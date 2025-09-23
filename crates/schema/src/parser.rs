@@ -133,7 +133,10 @@ rule definition(s:&S) -> Definition = parts:(
 }
 rule inline_sql_part(s:&S) -> InlineSqlTypePart =
 	i:code_ident(s) {InlineSqlTypePart::TypeRef(TypeIdent::alloc(i))}
-rule inline_sql(s:&S) -> InlineSqlType = parts:inline(<inline_sql_part(s)>) {{
+rule inline_sql(s:&S) -> InlineSqlType = parts:(
+	inline(<inline_sql_part(s)>)
+	/ compat_only(s, <custom_inline(<inline_sql_part(s)>, <"$$">, <"$$">, <"${">, <"}">)>)
+) {{
 	InlineSqlType(parts.into_iter().map(|v| match v {
 		InlinePart::Text(t) => InlineSqlTypePart::Raw(t),
 		InlinePart::Template(t) => t,

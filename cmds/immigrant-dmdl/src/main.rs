@@ -1,4 +1,5 @@
 use std::env::current_dir;
+use std::process;
 
 use clap::Parser;
 use cli::current_schema;
@@ -27,7 +28,14 @@ fn main() -> anyhow::Result<()> {
 	let _opts = Opts::parse();
 
 	let root = find_root(&current_dir()?)?;
-	let (_, schema, rn) = current_schema(&root)?;
+	let (s, schema, report, rn) = current_schema(&root)?;
+	if report.is_error() {
+		eprintln!("schema parsing failed:");
+		for s in report.to_hi_doc(&s) {
+			eprint!("{}", hi_doc::source_to_ansi(&s));
+		}
+		process::exit(1);
+	}
 	for item in &schema.0 {
 		match item {
 			Item::Table(t) => {

@@ -59,7 +59,7 @@ pub fn stored_schema(
 		schema_str = migration.apply_diff(schema_str)?;
 	}
 	let mut rn = RenameMap::default();
-	let (schema, report) = parse_schema(&schema_str, false, &mut rn)?;
+	let (schema, report) = parse_schema(&schema_str, true, &mut rn)?;
 	Ok((schema_str, schema, report, rn))
 }
 

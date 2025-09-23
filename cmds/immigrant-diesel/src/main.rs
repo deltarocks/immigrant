@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, env::current_dir};
+use std::{collections::BTreeSet, env::current_dir, process};
 
 use clap::Parser;
 use cli::current_schema;
@@ -12,6 +12,7 @@ use quote::{format_ident, quote, TokenStreamExt};
 use rust_format::{Config, Edition, Formatter, PostProcess};
 use schema::{
 	composite::CompositeField,
+	diagnostics::Report,
 	process::NamingConvention,
 	root::Schema,
 	scalar::EnumItem,
@@ -274,14 +275,21 @@ fn print_schema() -> anyhow::Result<()> {
 	let mut config = root.clone();
 	config.push("immigrant-diesel.jsonnet");
 
-	let (_, schema, rn) = current_schema(&root)?;
+	let (s, schema, mut report, rn) = current_schema(&root)?;
 	let rn = &rn;
-	let generated = generate_schema(schema, rn)?;
+	let generated = generate_schema(schema, &mut report, rn)?;
+	if report.is_error() {
+		eprintln!("schema parsing failed:");
+		for s in report.to_hi_doc(&s) {
+			eprint!("{}", hi_doc::source_to_ansi(&s));
+		}
+		process::exit(1);
+	}
 	println!("{generated}");
 	Ok(())
 }
 
-fn generate_schema(schema: Schema, rn: &RenameMap) -> anyhow::Result<String> {
+fn generate_schema(schema: Schema, report: &mut Report, rn: &RenameMap) -> anyhow::Result<String> {
 	let mut out = TokenStream::new();
 	out.append_all(quote! {
 		pub mod user_types;
@@ -366,7 +374,7 @@ fn generate_schema(schema: Schema, rn: &RenameMap) -> anyhow::Result<String> {
 		let values = en.items.iter().map(|i| {
 			let name = i.db(rn);
 			let name = name.raw();
-			quote!{#name}
+			quote! {#name}
 		});
 		let value_count = en.items.len();
 
@@ -521,7 +529,7 @@ fn generate_schema(schema: Schema, rn: &RenameMap) -> anyhow::Result<String> {
 			} else {
 				quote!()
 			};
-			let db_ty = column.db_type(rn);
+			let db_ty = column.db_type(rn, report);
 			let db_ty = db_ty.raw();
 			let column_doc = format!("`{table_name}`.`{name} column`");
 			let ty_doc = format!("The SQL type is \"{db_ty}\"`");
@@ -845,6 +853,7 @@ fn generate_schema(schema: Schema, rn: &RenameMap) -> anyhow::Result<String> {
 
 #[cfg(test)]
 mod tests {
+	use schema::diagnostics::Report;
 	use schema::parser::parse;
 	use schema::process::NamingConvention;
 	use schema::root::SchemaProcessOptions;
@@ -861,8 +870,11 @@ mod tests {
 
 	fn test_generator(schema: &str) {
 		let mut rn = RenameMap::default();
-		let schema = parse(schema, &default_options(), &mut rn).expect("parse result");
-		let generated = generate_schema(schema, &rn).expect("generate");
+		let mut report = Report::new();
+		let schema =
+			parse(schema, false, &default_options(), &mut rn, &mut report).expect("parse result");
+		let generated = generate_schema(schema, &mut report, &rn).expect("generate");
+		assert!(!report.is_error());
 		println!("{generated}");
 	}
 

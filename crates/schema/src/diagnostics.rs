@@ -3,24 +3,26 @@ use hi_doc::{Formatting, SnippetBuilder, Text};
 
 use crate::span::SimpleSpan;
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone, Copy)]
 pub enum Severity {
 	Warning,
 	Error,
 }
 
+#[derive(Clone)]
 pub struct ReportPart {
 	pub msg: String,
 	pub severity: Severity,
 	pub annotations: Vec<Annotation>,
 }
 
+#[derive(Clone)]
 pub struct Annotation {
 	pub span: SimpleSpan,
 	pub msg: String,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Report {
 	pub parts: Vec<ReportPart>,
 }

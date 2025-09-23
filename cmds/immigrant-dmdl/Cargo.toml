@@ -9,3 +9,4 @@ clap.workspace = true
 file-diffs.workspace = true
 schema.workspace = true
 cli.workspace = true
+hi-doc.workspace = true

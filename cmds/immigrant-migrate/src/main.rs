@@ -2,7 +2,7 @@ use std::{env, env::current_dir, fs};
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
-use cli::{current_schema, generate_sql, generate_sql_nowrite, stored_schema};
+use cli::{current_schema, display_reports, generate_sql, generate_sql_nowrite, stored_schema};
 use file_diffs::{find_root, list, Migration, MigrationId};
 use futures::StreamExt;
 use sqlx::{postgres::PgPoolOptions, Acquire, Executor, Postgres, Transaction};
@@ -193,10 +193,10 @@ async fn main() -> Result<()> {
 			}
 			let id = list.last().map(|(id, _, _)| id.id + 1).unwrap_or_default();
 
-			let (original_str, original, orig_rn) =
+			let (original_str, original, mut original_report, orig_rn) =
 				stored_schema(&list).context("failed to load past migrations")?;
 
-			let (current_str, current, current_rn) =
+			let (current_str, current, mut current_report, current_rn) =
 				current_schema(&root).context("failed to parse current schema")?;
 
 			let mut rn = orig_rn;
@@ -218,14 +218,14 @@ async fn main() -> Result<()> {
 				after_up_sql,
 				before_down_sql,
 				after_down_sql,
-				current_str,
+				current_str.clone(),
 			);
 
 			if should_use_editor {
 				bail!("$EDITOR usage is not yet supported")
 			}
 
-			migration.to_diff(original_str)?;
+			migration.to_diff(original_str.clone())?;
 
 			if migration.is_noop() {
 				println!("No changes found");
@@ -236,7 +236,17 @@ async fn main() -> Result<()> {
 				return Ok(());
 			}
 
-			let (sql, _) = generate_sql_nowrite(&migration, &original, &current, &rn)?;
+			let (sql, _) = generate_sql_nowrite(
+				&migration,
+				&original,
+				&current,
+				&rn,
+				&mut original_report,
+				&mut current_report,
+			)?;
+			if display_reports(&original_str, &current_str, original_report.clone(), current_report.clone()) {
+				bail!("errors are reported, cannot continue");
+			}
 			if let Err(e) = run_migrations(
 				&mut tx,
 				id.id,
@@ -268,7 +278,17 @@ async fn main() -> Result<()> {
 				println!("Dry-run succeeded");
 			}
 			if !dry_run || write {
-				generate_sql(&migration, &original, &current, &rn, &dir)?;
+				generate_sql(
+					&migration,
+					&original_str,
+					&current_str,
+					&original,
+					&current,
+					&rn,
+					&dir,
+					original_report,
+					current_report,
+				)?;
 			}
 		}
 	}

@@ -15,3 +15,4 @@ proc-macro2 = "1.0.69"
 prettyplease = "0.2.15"
 rust-format = { version = "0.3.4", features = ["token_stream", "post_process", "pretty_please"] }
 Inflector.workspace = true
+hi-doc.workspace = true

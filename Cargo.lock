@@ -1023,6 +1023,7 @@ dependencies = [
  "Inflector",
  "anyhow",
  "clap",
+ "hi-doc",
  "immigrant-cli",
  "immigrant-file-diffs",
  "immigrant-schema",
@@ -1039,6 +1040,7 @@ version = "0.1.2"
 dependencies = [
  "anyhow",
  "clap",
+ "hi-doc",
  "immigrant-cli",
  "immigrant-file-diffs",
  "immigrant-schema",
