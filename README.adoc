@@ -116,3 +116,7 @@ none of the implementations seemed to be complete enough, and usage of raw sql d
 <<types-goal,user-defined types>>. They also don't provide good enough solution to storing the schema history, and
 most useable tools <<autonomous-goal,require the connection to the database>>.
 
+== Related Projects
+
+https://github.com/deltarocks/tree-sitter-immigrant[tree-sitter-immigrant]:: Tree-sitter grammar for the immigrant language, providing syntax highlighting and parsing support.
+
