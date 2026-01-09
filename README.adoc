@@ -1,7 +1,7 @@
 = immigrant
 
 ++++
-<p align="center"><a href="https://github.com/CertainLach/immigrant"><img alt="immigrant temporary logo generated with midjourney" src="./docs/logo.svg" height="150"></img></a></p>
+<p align="center"><a href="https://github.com/CertainLach/immigrant"><img alt="immigrant logo by https://www.behance.net/fluqua" src="./docs/logo.svg" height="150"></img></a></p>
 ++++
 
 An database schema definition language.
