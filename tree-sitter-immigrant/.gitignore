@@ -1,9 +1,0 @@
-/binding.gyp
-/bindings
-/log.html
-/src
-/test
-/node_modules
-/yarn.lock
-/build
-/.yarn
