@@ -2,11 +2,10 @@
   "nodes": {
     "crane": {
       "locked": {
-        "lastModified": 1736898272,
-        "narHash": "sha256-D10wlrU/HCpSRcb3a7yk+bU3ggpMD1kGbseKtO+7teo=",
+        "lastModified": 1767744144,
         "owner": "ipetkov",
         "repo": "crane",
-        "rev": "6a589f034202a7c6e10bce6c5d1d392d7bc0f340",
+        "rev": "2fb033290bf6b23f226d4c8b32f7f7a16b043d7e",
         "type": "github"
       },
       "original": {
@@ -22,11 +21,10 @@
         ]
       },
       "locked": {
-        "lastModified": 1736143030,
-        "narHash": "sha256-+hu54pAoLDEZT9pjHlqL9DNzWz0NbUn8NEAHP7PQPzU=",
+        "lastModified": 1767609335,
         "owner": "hercules-ci",
         "repo": "flake-parts",
-        "rev": "b905f6fc23a9051a6e1b741e1438dbfc0634c6de",
+        "rev": "250481aafeb741edfe23d29195671c19b36b6dca",
         "type": "github"
       },
       "original": {
@@ -37,16 +35,15 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1737077867,
-        "narHash": "sha256-+VpCgelbCgJvxos+4sAVaKfwYRKrkflsWcYVOhG0mXg=",
+        "lastModified": 1767988132,
         "owner": "nixos",
         "repo": "nixpkgs",
-        "rev": "0ab8bdef1a34b67d2ecc8f86763cbb3cb5297699",
+        "rev": "540f0c13536d7cbdb60d59bd7b33b678d67ac4b9",
         "type": "github"
       },
       "original": {
         "owner": "nixos",
-        "ref": "release-24.11",
+        "ref": "release-25.11",
         "repo": "nixpkgs",
         "type": "github"
       }
@@ -67,11 +64,10 @@
         ]
       },
       "locked": {
-        "lastModified": 1737080704,
-        "narHash": "sha256-n+J2h9GM9ZpFOQUmtZoCr1+DFF/iO5UlmLJeHIxbZGY=",
+        "lastModified": 1767926800,
         "owner": "oxalica",
         "repo": "rust-overlay",
-        "rev": "f9953fe89f8b65401fc4d4a288940bc2cb072949",
+        "rev": "499e9eed88ff9494b6604205b42847e847dfeb91",
         "type": "github"
       },
       "original": {
@@ -82,11 +78,10 @@
     },
     "shelly": {
       "locked": {
-        "lastModified": 1737089050,
-        "narHash": "sha256-SQ22z9L7fSC8FWNIlImpKeBGBUPoWpsTy9uc75o7uK0=",
+        "lastModified": 1756323923,
         "owner": "CertainLach",
         "repo": "shelly",
-        "rev": "b5fa6bb56dcd1541ec399ceab1e95a74872ecd34",
+        "rev": "b5dd29a500db04f54a9f1c2bf81cdd84df8b0cd7",
         "type": "github"
       },
       "original": {

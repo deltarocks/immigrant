@@ -7,7 +7,7 @@ use crate::{
 };
 
 macro_rules! def_kind {
-    ($($name:ident($v:expr)),+ $(,)?) => {
+    ($($name:ident($v:expr_2021)),+ $(,)?) => {
         $(
             pub enum $name {}
             impl Kind for $name {

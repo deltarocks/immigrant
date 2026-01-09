@@ -5,21 +5,25 @@ edition.workspace = true
 
 [dependencies]
 Inflector.workspace = true
-base32 = "0.4.0"
+base32 = "0.5.1"
 blake2 = "0.10.6"
 derivative = "2.2.0"
 hi-doc = {workspace = true, optional = true}
-itertools = "0.11.0"
-paste = "1.0.12"
-peg = "0.8.1"
-replace_with = "0.1.7"
+itertools = "0.14.0"
+paste = "1.0.15"
+peg = "0.8.5"
+replace_with = "0.1.8"
 thiserror.workspace = true
-tracing = "0.1.37"
+tracing = "0.1.44"
+tree-sitter-highlight = { version = "0.26.3", optional = true }
+tree-sitter-immigrant = { version = "0.1.0", optional = true }
 
 [dev-dependencies]
-tracing-subscriber = "0.3.17"
+tracing-subscriber = "0.3.22"
 
 [features]
+default = ["hi-doc", "tree-sitter-highlight"]
 hi-doc = ["dep:hi-doc"]
 # TODO: Use debug-assertions instead
 strict = []
+tree-sitter-highlight = ["hi-doc", "dep:tree-sitter-highlight", "dep:tree-sitter-immigrant"]

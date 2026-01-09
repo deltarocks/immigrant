@@ -5,13 +5,13 @@ edition.workspace = true
 build = "build.rs"
 
 [dependencies]
-itertools = "0.11.0"
+itertools = "0.14.0"
 permutation = "0.4.1"
 schema.workspace = true
 tempfile.workspace = true
-tracing = "0.1.37"
-tracing-test = "0.2.4"
+tracing = "0.1.44"
+tracing-test = "0.2.5"
 blake2 = "0.10.6"
 
 [dev-dependencies]
-tracing-subscriber = "0.3.17"
+tracing-subscriber = "0.3.22"

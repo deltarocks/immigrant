@@ -96,10 +96,10 @@ impl AttributeList {
 		if v.len() > 1 {
 			return Err(DuplicateAttributeError.into());
 		}
-		if let Some(v) = v.into_iter().next() {
+		match v.into_iter().next() { Some(v) => {
 			Ok(v)
-		} else {
+		} _ => {
 			T::try_from(AttributeValue::Unset)
-		}
+		}}
 	}
 }

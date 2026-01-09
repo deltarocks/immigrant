@@ -41,7 +41,7 @@ mod util;
 
 #[macro_export]
 macro_rules! w {
-    ($out:expr, $($tt:tt)*) => {{
+    ($out:expr_2021, $($tt:tt)*) => {{
         use std::fmt::Write;
         write!($out, $($tt)*).unwrap();
     }};

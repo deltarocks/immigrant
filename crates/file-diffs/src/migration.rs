@@ -5,7 +5,7 @@ use std::{
 	str::{FromStr, Lines},
 };
 
-use imara_diff::{diff, intern::InternedInput, Algorithm, UnifiedDiffBuilder};
+use imara_diff::{Algorithm, BasicLineDiffPrinter, Diff, InternedInput, UnifiedDiffConfig};
 use Error::*;
 
 use crate::patch_util::{self, OwnedPatch};
@@ -73,11 +73,14 @@ impl Migration {
 			return Ok(());
 		};
 		let diff_input = InternedInput::new(old_schema.as_str(), reset.as_str());
-		let update = diff(
-			Algorithm::Histogram,
-			&diff_input,
-			UnifiedDiffBuilder::new(&diff_input),
-		);
+		let diff = Diff::compute(Algorithm::Histogram, &diff_input);
+		let update = diff
+			.unified_diff(
+				&BasicLineDiffPrinter(&diff_input.interner),
+				UnifiedDiffConfig::default(),
+				&diff_input,
+			)
+			.to_string();
 		if update.trim().is_empty() {
 			self.schema_diff = MigrationSchemaDiff::None;
 		} else {

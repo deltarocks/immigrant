@@ -9,10 +9,10 @@ schema.workspace = true
 cli.workspace = true
 file-diffs.workspace = true
 anyhow.workspace = true
-quote = "1.0.33"
-syn = "2.0.38"
-proc-macro2 = "1.0.69"
-prettyplease = "0.2.15"
+quote = "1.0.43"
+syn = "2.0.114"
+proc-macro2 = "1.0.105"
+prettyplease = "0.2.37"
 rust-format = { version = "0.3.4", features = ["token_stream", "post_process", "pretty_please"] }
 Inflector.workspace = true
 hi-doc.workspace = true

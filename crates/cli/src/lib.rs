@@ -6,7 +6,6 @@ use std::{
 use anyhow::{anyhow, bail};
 use file_diffs::{Migration, MigrationId};
 use generator_postgres::Pg;
-use hi_doc::{SnippetBuilder, Text};
 use schema::{
 	diagnostics::Report,
 	parser,

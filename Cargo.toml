@@ -1,6 +1,6 @@
 [workspace.package]
-version = "0.1.2"
-edition = "2021"
+version = "0.2.0"
+edition = "2024"
 
 [workspace]
 members = [
@@ -14,12 +14,12 @@ schema = { package = "immigrant-schema", path = "crates/schema" }
 file-diffs = { package = "immigrant-file-diffs", path = "crates/file-diffs" }
 cli = { package = "immigrant-cli", path = "crates/cli" }
 generator-postgres = { package = "immigrant-generator-postgres", path = "crates/generator-postgres" }
-anyhow = "1.0.71"
-hi-doc = { git = "https://github.com/CertainLach/ass-stroke" }
-imara-diff = "0.1.5"
-ouroboros = "0.15.6"
+anyhow = "1.0.100"
+hi-doc = "0.3.0"
+imara-diff = "0.2.0"
+ouroboros = "0.18.5"
 patch = "0.7.0"
-thiserror = "1.0.40"
-clap = { version = "4.4.18", features = ["derive"] }
+thiserror = "2.0.17"
+clap = { version = "4.5.54", features = ["derive"] }
 Inflector = "0.11.4"
-tempfile = "3.7.1"
+tempfile = "3.24.0"
