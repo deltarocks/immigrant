@@ -3,6 +3,8 @@ name = "immigrant-generator-postgres"
 version.workspace = true
 edition.workspace = true
 build = "build.rs"
+license.workspace = true
+description = "Immigrant migrations generator for postgres SQL dialect"
 
 [dependencies]
 itertools = "0.14.0"

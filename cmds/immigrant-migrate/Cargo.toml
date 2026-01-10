@@ -2,6 +2,8 @@
 name = "immigrant-migrate"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+description = "Immigrant CLI helper for postgres migration"
 
 [dependencies]
 anyhow.workspace = true

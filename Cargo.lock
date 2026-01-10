@@ -1014,6 +1014,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "immigrant-web"
+version = "0.2.0"
+dependencies = [
+ "console_error_panic_hook",
+ "immigrant-generator-postgres",
+ "immigrant-schema",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2476,16 +2486,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cbc538057e648b67f72a982e708d485b2efa771e1ac05fec311f9f63e5800db4"
 dependencies = [
  "unicode-ident",
-]
-
-[[package]]
-name = "web"
-version = "0.2.0"
-dependencies = [
- "console_error_panic_hook",
- "immigrant-generator-postgres",
- "immigrant-schema",
- "wasm-bindgen",
 ]
 
 [[package]]

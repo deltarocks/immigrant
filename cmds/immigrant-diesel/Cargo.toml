@@ -2,6 +2,8 @@
 name = "immigrant-diesel"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+description = "Immigrant diesel ORM codegen"
 
 [dependencies]
 clap.workspace = true

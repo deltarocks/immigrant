@@ -1,6 +1,7 @@
 [workspace.package]
 version = "0.2.0"
 edition = "2024"
+license = "MIT"
 
 [workspace]
 members = [
@@ -10,10 +11,10 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
-schema = { package = "immigrant-schema", path = "crates/schema" }
-file-diffs = { package = "immigrant-file-diffs", path = "crates/file-diffs" }
-cli = { package = "immigrant-cli", path = "crates/cli" }
-generator-postgres = { package = "immigrant-generator-postgres", path = "crates/generator-postgres" }
+schema = { version = "0.2.0", package = "immigrant-schema", path = "crates/schema" }
+file-diffs = { version = "0.2.0", package = "immigrant-file-diffs", path = "crates/file-diffs" }
+cli = { version = "0.2.0", package = "immigrant-cli", path = "crates/cli" }
+generator-postgres = { version = "0.2.0", package = "immigrant-generator-postgres", path = "crates/generator-postgres" }
 anyhow = "1.0.100"
 hi-doc = "0.3.0"
 imara-diff = "0.2.0"

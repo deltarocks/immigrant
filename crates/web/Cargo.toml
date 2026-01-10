@@ -1,7 +1,10 @@
 [package]
-name = "web"
+name = "immigrant-web"
 version.workspace = true
 edition.workspace = true
+publish = false
+license.workspace = true
+description = "Immigrant core JS bindings"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

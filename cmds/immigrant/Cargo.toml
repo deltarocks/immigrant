@@ -3,6 +3,8 @@ name = "immigrant"
 version.workspace = true
 edition.workspace = true
 default-run = "immigrant"
+license.workspace = true
+description = "Immigrant schema definition language - CLI"
 
 [dependencies]
 Inflector.workspace = true
