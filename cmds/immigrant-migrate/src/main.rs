@@ -28,6 +28,8 @@ enum Subcommand {
 		#[clap(long)]
 		dry_run: bool,
 		#[clap(long)]
+		check_only: bool,
+		#[clap(long)]
 		unsafe_override_mismatched: Vec<u32>,
 		/// If true - migration should be saved to disk.
 		/// Always set if not in dry-run mode, in dry-run it is disabled by default.
@@ -132,6 +134,7 @@ async fn main() -> Result<()> {
 			before_down_sql,
 			after_down_sql,
 			dry_run,
+			check_only,
 			write,
 			unsafe_override_mismatched,
 		} => {
@@ -234,6 +237,8 @@ async fn main() -> Result<()> {
 					tx.commit().await?;
 				}
 				return Ok(());
+			} else if check_only {
+				bail!("unexpected unapplied migration: {migration}");
 			}
 
 			let (sql, _) = generate_sql_nowrite(

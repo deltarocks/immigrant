@@ -1,8 +1,8 @@
 #diesel(type = "dt::Integer", native = "i32", copy)
-scalar int = "INTEGER";
+scalar int = sql"INTEGER";
 
 #diesel(type = "dt::Timestamp", custom)
-scalar datetime = "TIMESTAMPTZ" @default(now());
+scalar datetime = sql"TIMESTAMPTZ" @default(now());
 
 table Test {
 	pk: int @primary_key;

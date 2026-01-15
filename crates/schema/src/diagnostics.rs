@@ -132,7 +132,7 @@ fn diagnostics() {
 	let mut report = Report::new();
 
 	let src = r#"
-			scalar idd = "INTEGER";
+			scalar idd = sql"INTEGER";
 			table A {
 				idd;
 			};

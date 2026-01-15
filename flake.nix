@@ -30,6 +30,7 @@
           config,
           system,
           pkgs,
+          lib,
           ...
         }:
         let
@@ -46,11 +47,19 @@
             inherit system;
             overlays = [ rust-overlay.overlays.default ];
           };
-          packages = {
+          packages = let
+            root = ./.;
+          in {
             default = packages.immigrant;
             immigrant = craneLib.buildPackage {
               pname = "immigrant";
-              src = craneLib.cleanCargoSource (craneLib.path ./.);
+              src = lib.fileset.toSource {
+                inherit root;
+                fileset = lib.fileset.unions [
+                  (craneLib.fileset.commonCargoSources root)
+                  (lib.fileset.fileFilter (file: file.hasExt "schema") root)
+                ];
+              };
               strictDeps = true;
               nativeBuildInputs = sharedDeps;
             };
@@ -65,7 +74,7 @@
               ]
               ++ sharedDeps;
           };
-          formatter = pkgs.alejandra;
+          formatter = pkgs.nixfmt;
         };
     };
 }
