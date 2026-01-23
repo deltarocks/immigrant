@@ -13,6 +13,7 @@ use schema::{
 	root::{Schema, SchemaProcessOptions},
 	uid::RenameMap,
 };
+use tracing::debug;
 
 pub fn parse_schema(
 	schema: &str,
@@ -54,7 +55,9 @@ pub fn stored_schema(
 	list: &[(MigrationId, Migration, PathBuf)],
 ) -> anyhow::Result<(String, Schema, Report, RenameMap)> {
 	let mut schema_str = String::new();
-	for (_, migration, _) in list {
+	debug!("applying patches");
+	for (i, migration, _) in list {
+		debug!("patch {}", i.slug);
 		schema_str = migration.apply_diff(schema_str)?;
 	}
 	let mut rn = RenameMap::default();

@@ -10,3 +10,4 @@ imara-diff.workspace = true
 ouroboros.workspace = true
 patch.workspace = true
 thiserror.workspace = true
+tracing = "0.1.44"

@@ -5,8 +5,9 @@ use std::{
 	str::{FromStr, Lines},
 };
 
-use imara_diff::{Algorithm, BasicLineDiffPrinter, Diff, InternedInput, UnifiedDiffConfig};
 use Error::*;
+use imara_diff::{Algorithm, BasicLineDiffPrinter, Diff, InternedInput, UnifiedDiffConfig};
+use tracing::trace;
 
 use crate::patch_util::{self, OwnedPatch};
 
@@ -65,8 +66,14 @@ impl Migration {
 	pub fn apply_diff(&self, old_schema: String) -> Result<String> {
 		Ok(match &self.schema_diff {
 			MigrationSchemaDiff::None => old_schema,
-			MigrationSchemaDiff::Reset(schema) => schema.to_owned(),
-			MigrationSchemaDiff::Diff(diff) => diff.apply(&old_schema)?,
+			MigrationSchemaDiff::Reset(schema) => {
+				trace!("reset = {schema}");
+				schema.to_owned()
+			}
+			MigrationSchemaDiff::Diff(diff) => {
+				trace!("diff = {diff}");
+				diff.apply(&old_schema)?
+			}
 		})
 	}
 	// Convert reset schema to diff schema
@@ -74,6 +81,9 @@ impl Migration {
 		let MigrationSchemaDiff::Reset(reset) = &self.schema_diff else {
 			return Ok(());
 		};
+		if old_schema.trim().is_empty() {
+			return Ok(());
+		}
 		let diff_input = InternedInput::new(old_schema.as_str(), reset.as_str());
 		let diff = Diff::compute(Algorithm::Histogram, &diff_input);
 		let update = diff
