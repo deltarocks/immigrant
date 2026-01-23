@@ -85,7 +85,8 @@ impl Migration {
 			return Ok(());
 		}
 		let diff_input = InternedInput::new(old_schema.as_str(), reset.as_str());
-		let diff = Diff::compute(Algorithm::Histogram, &diff_input);
+		let mut diff = Diff::compute(Algorithm::Histogram, &diff_input);
+		diff.postprocess_lines(&diff_input);
 		let update = diff
 			.unified_diff(
 				&BasicLineDiffPrinter(&diff_input.interner),
