@@ -3,7 +3,7 @@ use crate::column::Column;
 use crate::id_impls;
 use crate::names::{MixinIdent, MixinKind};
 use crate::table::{ForeignKey, TableAnnotation};
-use crate::uid::{next_uid, OwnUid};
+use crate::uid::{OwnUid, next_uid};
 
 #[derive(Debug)]
 pub struct Mixin {

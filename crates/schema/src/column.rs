@@ -8,7 +8,15 @@ use super::{
 	table::{ForeignKey, TableAnnotation},
 };
 use crate::{
-	attribute::AttributeList, changelist::IsCompatible, def_name_impls, derive_is_isomorph_by_id_name, diagnostics::Report, index::{Check, PrimaryKey, UniqueConstraint}, names::{ColumnDefName, ColumnIdent, ColumnKind, DbNativeType, DefName, TypeIdent}, scalar::PropagatedScalarData, uid::{next_uid, OwnUid, RenameMap}, HasIdent, SchemaType, TableColumn
+	HasIdent, SchemaType, TableColumn,
+	attribute::AttributeList,
+	changelist::IsCompatible,
+	def_name_impls, derive_is_isomorph_by_id_name,
+	diagnostics::Report,
+	index::{Check, PrimaryKey, UniqueConstraint},
+	names::{ColumnDefName, ColumnIdent, ColumnKind, DbNativeType, DefName, TypeIdent},
+	scalar::PropagatedScalarData,
+	uid::{OwnUid, RenameMap, next_uid},
 };
 
 #[derive(Debug)]

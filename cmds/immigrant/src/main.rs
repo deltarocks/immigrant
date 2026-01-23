@@ -8,10 +8,10 @@ use std::{
 	process,
 };
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use clap::{CommandFactory, FromArgMatches, Parser};
 use cli::{current_schema, display_reports, generate_sql, parse_schema, stored_schema};
-use file_diffs::{find_root, list, list_ids, Migration, MigrationId};
+use file_diffs::{Migration, MigrationId, find_root, list, list_ids};
 use generator_postgres::Pg;
 use schema::{diagnostics::Report, root::Schema, uid::RenameMap};
 
@@ -301,8 +301,7 @@ fn main() -> anyhow::Result<()> {
 				let old_schema_str = current_schema_str.clone();
 				current_schema_str = migration.apply_diff(current_schema_str)?;
 				let mut crn = RenameMap::default();
-				let (updated_schema, report) =
-					parse_schema(&current_schema_str, true, &mut crn)?;
+				let (updated_schema, report) = parse_schema(&current_schema_str, true, &mut crn)?;
 				rn.merge(crn);
 				generator_postgres::validate::validate(&current_schema_str, &updated_schema, &rn);
 

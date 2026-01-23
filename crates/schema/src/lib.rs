@@ -4,7 +4,19 @@ use derivative::Derivative;
 use ids::DbIdent;
 
 use self::{
-	attribute::AttributeList, column::Column, composite::Composite, diagnostics::Report, ids::Ident, index::{Check, Index, PrimaryKey, UniqueConstraint}, names::{ItemKind, TypeIdent}, root::Schema, scalar::{Enum, Scalar, ScalarAnnotation}, sql::Sql, table::{ForeignKey, Table, TableAnnotation}, uid::RenameMap, view::View
+	attribute::AttributeList,
+	column::Column,
+	composite::Composite,
+	diagnostics::Report,
+	ids::Ident,
+	index::{Check, Index, PrimaryKey, UniqueConstraint},
+	names::{ItemKind, TypeIdent},
+	root::Schema,
+	scalar::{Enum, Scalar, ScalarAnnotation},
+	sql::Sql,
+	table::{ForeignKey, Table, TableAnnotation},
+	uid::RenameMap,
+	view::View,
 };
 
 pub mod column;
@@ -29,7 +41,7 @@ pub mod attribute;
 mod changelist;
 pub mod renamelist;
 
-pub use changelist::{mk_change_list, ChangeList, IsCompatible, IsIsomorph};
+pub use changelist::{ChangeList, IsCompatible, IsIsomorph, mk_change_list};
 
 mod span;
 pub mod uid;
@@ -120,16 +132,30 @@ impl<T> IsCompatible for TableItem<'_, T>
 where
 	T: IsCompatible,
 {
-	fn is_compatible(&self, new: &Self, rn: &RenameMap, report_self: &mut Report, report_new: &mut Report) -> bool {
-		self.value.is_compatible(new.value, rn, report_self, report_new)
+	fn is_compatible(
+		&self,
+		new: &Self,
+		rn: &RenameMap,
+		report_self: &mut Report,
+		report_new: &mut Report,
+	) -> bool {
+		self.value
+			.is_compatible(new.value, rn, report_self, report_new)
 	}
 }
 impl<T> IsIsomorph for TableItem<'_, T>
 where
 	T: IsIsomorph,
 {
-	fn is_isomorph(&self, other: &Self, rn: &RenameMap, report_self: &mut Report, report_other: &mut Report) -> bool {
-		self.value.is_isomorph(other.value, rn, report_self, report_other)
+	fn is_isomorph(
+		&self,
+		other: &Self,
+		rn: &RenameMap,
+		report_self: &mut Report,
+		report_other: &mut Report,
+	) -> bool {
+		self.value
+			.is_isomorph(other.value, rn, report_self, report_other)
 	}
 }
 impl<T> HasUid for TableItem<'_, T>

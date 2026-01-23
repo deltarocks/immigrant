@@ -4,7 +4,7 @@ use std::process;
 use clap::Parser;
 use cli::current_schema;
 use file_diffs::find_root;
-use schema::{root::Item, table::Cardinality, HasIdent, SchemaTable};
+use schema::{HasIdent, SchemaTable, root::Item, table::Cardinality};
 
 /// Generate db structure in dmdl format
 #[derive(Parser)]
@@ -17,11 +17,7 @@ fn common_spaces_prefix<'a>(lines: impl Iterator<Item = &'a str>) -> usize {
 		spaces = spaces.min(doc.chars().take_while(|&arg| arg == ' ').count());
 	}
 	// assert_ne!(spaces, usize::MAX, "docs are not empty");
-	if spaces == usize::MAX {
-		0
-	} else {
-		spaces
-	}
+	if spaces == usize::MAX { 0 } else { spaces }
 }
 
 fn main() -> anyhow::Result<()> {

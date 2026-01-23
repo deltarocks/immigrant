@@ -9,7 +9,10 @@ use std::{collections::HashSet, fmt::Debug};
 use itertools::Itertools;
 
 use crate::{
-	diagnostics::Report, renamelist::{reorder_renames, RenameMoveaway, RenameOp, RenameTempAllocator}, uid::{RenameExt, RenameMap}, Diff
+	Diff,
+	diagnostics::Report,
+	renamelist::{RenameMoveaway, RenameOp, RenameTempAllocator, reorder_renames},
+	uid::{RenameExt, RenameMap},
 };
 
 #[derive(Debug, PartialEq)]
@@ -33,25 +36,49 @@ impl<T: RenameExt> ChangeList<T> {
 }
 
 pub trait IsCompatible {
-	fn is_compatible(&self, new: &Self, rn: &RenameMap, report_self: &mut Report, report_new: &mut Report) -> bool;
+	fn is_compatible(
+		&self,
+		new: &Self,
+		rn: &RenameMap,
+		report_self: &mut Report,
+		report_new: &mut Report,
+	) -> bool;
 }
 impl<T> IsCompatible for &T
 where
 	T: IsCompatible,
 {
-	fn is_compatible(&self, new: &Self, rn: &RenameMap, report_self: &mut Report, report_new: &mut Report) -> bool {
+	fn is_compatible(
+		&self,
+		new: &Self,
+		rn: &RenameMap,
+		report_self: &mut Report,
+		report_new: &mut Report,
+	) -> bool {
 		(**self).is_compatible(*new, rn, report_self, report_new)
 	}
 }
 
 pub trait IsIsomorph {
-	fn is_isomorph(&self, other: &Self, rn: &RenameMap, report_self: &mut Report, report_other: &mut Report) -> bool;
+	fn is_isomorph(
+		&self,
+		other: &Self,
+		rn: &RenameMap,
+		report_self: &mut Report,
+		report_other: &mut Report,
+	) -> bool;
 }
 impl<T> IsIsomorph for &T
 where
 	T: IsIsomorph,
 {
-	fn is_isomorph(&self, new: &Self, rn: &RenameMap, report_self: &mut Report, report_other: &mut Report) -> bool {
+	fn is_isomorph(
+		&self,
+		new: &Self,
+		rn: &RenameMap,
+		report_self: &mut Report,
+		report_other: &mut Report,
+	) -> bool {
 		(**self).is_isomorph(*new, rn, report_self, report_other)
 	}
 }
@@ -59,7 +86,13 @@ where
 macro_rules! derive_is_isomorph_by_id_name {
 	($t:ty) => {
 		impl $crate::IsIsomorph for $t {
-			fn is_isomorph(&self, other: &Self, _rn: &$crate::RenameMap, _report_self: &mut $crate::diagnostics::Report, _report_other: &mut $crate::diagnostics::Report) -> bool {
+			fn is_isomorph(
+				&self,
+				other: &Self,
+				_rn: &$crate::RenameMap,
+				_report_self: &mut $crate::diagnostics::Report,
+				_report_other: &mut $crate::diagnostics::Report,
+			) -> bool {
 				use $crate::HasIdent;
 				HasIdent::id(self).name() == HasIdent::id(other).name()
 			}
@@ -107,10 +140,10 @@ pub fn mk_change_list<T: RenameExt + Clone + Copy + Debug, V: IsCompatible + IsI
 		if old_listed.contains(&oid) {
 			continue;
 		}
-		let mut new_by_code =
-			new.iter().cloned().enumerate().filter(|(i, f)| {
-				mapper(*f).is_isomorph(&mapper(old), rn, report_new, report_old) && !new_listed.contains(i)
-			});
+		let mut new_by_code = new.iter().cloned().enumerate().filter(|(i, f)| {
+			mapper(*f).is_isomorph(&mapper(old), rn, report_new, report_old)
+				&& !new_listed.contains(i)
+		});
 		if let Some((nid, new)) = new_by_code.next() {
 			assert!(new_by_code.next().is_none());
 			old_listed.insert(oid);
@@ -150,14 +183,17 @@ pub fn mk_change_list<T: RenameExt + Clone + Copy + Debug, V: IsCompatible + IsI
 	for recreated in out
 		.updated
 		.iter()
-		.filter(|diff| !mapper(diff.old).is_compatible(&mapper(diff.new), rn, report_old, report_new))
+		.filter(|diff| {
+			!mapper(diff.old).is_compatible(&mapper(diff.new), rn, report_old, report_new)
+		})
 		.collect::<Vec<_>>()
 	{
 		out.created.push(recreated.new);
 		out_dropped.push((recreated.old, Some(allocator.next_moveaway())));
 	}
-	out.updated
-		.retain(|diff| mapper(diff.old).is_compatible(&mapper(diff.new), rn, report_old, report_new));
+	out.updated.retain(|diff| {
+		mapper(diff.old).is_compatible(&mapper(diff.new), rn, report_old, report_new)
+	});
 
 	for (_, new) in new
 		.iter()
@@ -191,14 +227,14 @@ pub fn mk_change_list<T: RenameExt + Clone + Copy + Debug, V: IsCompatible + IsI
 #[cfg(all(test, any()))]
 mod tests {
 	use crate::{
+		HasDefaultDbName, HasIdent,
 		changelist::{ChangeList, IsCompatible},
-		ids::{in_allocator, DbIdent, Ident},
+		ids::{DbIdent, Ident, in_allocator},
 		mk_change_list,
 		names::{DefName, TypeKind},
 		renamelist::{RenameOp, RenameTempAllocator},
-		span::{register_source, SimpleSpan},
-		uid::{next_uid, HasUid, OwnUid, RenameMap, Uid},
-		HasDefaultDbName, HasIdent,
+		span::{SimpleSpan, register_source},
+		uid::{HasUid, OwnUid, RenameMap, Uid, next_uid},
 	};
 	#[test]
 	fn changelist_conflict() {

@@ -8,9 +8,10 @@ use inflector::{
 	string::pluralize,
 };
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote, TokenStreamExt};
+use quote::{TokenStreamExt, format_ident, quote};
 use rust_format::{Config, Edition, Formatter, PostProcess};
 use schema::{
+	HasIdent, SchemaComposite, SchemaEnum, SchemaTable, SchemaType, TableColumn,
 	composite::CompositeField,
 	diagnostics::Report,
 	process::NamingConvention,
@@ -18,7 +19,6 @@ use schema::{
 	scalar::EnumItem,
 	table::Cardinality,
 	uid::{RenameExt, RenameMap},
-	HasIdent, SchemaComposite, SchemaEnum, SchemaTable, SchemaType, TableColumn,
 };
 use syn::{Ident, Index, Path, Type};
 
@@ -214,7 +214,9 @@ fn column_ty_name(jojo_reference: bool, ty: &SchemaType) -> TokenStream {
 				panic!("#diesel(custom) is mutually exclusive with #diesel(native)");
 			}
 			if !custom && native.is_none() {
-				panic!("#diesel() annotation should specify type kind, i.e native = \"u32\" or custom (Then its implementation will be delegated to user_types module)");
+				panic!(
+					"#diesel() annotation should specify type kind, i.e native = \"u32\" or custom (Then its implementation will be delegated to user_types module)"
+				);
 			}
 
 			// TODO: disallow setting both at the same time

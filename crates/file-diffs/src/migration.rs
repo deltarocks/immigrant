@@ -16,7 +16,9 @@ pub enum Error {
 	PatchFailed(#[from] patch_util::Error),
 	#[error("update is empty")]
 	UpdateIsEmpty,
-	#[error("file should start with the header, which is prefixed by '# ' (notice it should have a space after sharp)")]
+	#[error(
+		"file should start with the header, which is prefixed by '# ' (notice it should have a space after sharp)"
+	)]
 	MissingHeader,
 	#[error("unexpected header: {0}")]
 	UnexpectedHeader(String),

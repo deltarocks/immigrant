@@ -4,6 +4,7 @@ use itertools::{Either, Itertools};
 
 use super::sql::Sql;
 use crate::{
+	HasIdent, SchemaEnum, SchemaScalar,
 	attribute::AttributeList,
 	changelist::IsCompatible,
 	column::ColumnAnnotation,
@@ -15,8 +16,7 @@ use crate::{
 		DbEnumItem, DbNativeType, EnumItemDefName, EnumItemKind, TypeDefName, TypeIdent, TypeKind,
 	},
 	root::Schema,
-	uid::{next_uid, OwnUid, RenameExt, RenameMap},
-	HasIdent, SchemaEnum, SchemaScalar,
+	uid::{OwnUid, RenameExt, RenameMap, next_uid},
 };
 
 #[derive(Debug)]

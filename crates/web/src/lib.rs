@@ -75,8 +75,20 @@ pub fn diff(a: String, b: String) -> DiffResult {
 		(Ok(a), Ok(b)) => {
 			let mut diff_up = String::new();
 			let mut diff_down = String::new();
-			Pg(&b).diff(&Pg(&a), &mut diff_up, &mut rn.clone(), &mut report_a, &mut report_b);
-			Pg(&a).diff(&Pg(&b), &mut diff_down, &mut rn.clone(), &mut report_b, &mut report_a);
+			Pg(&b).diff(
+				&Pg(&a),
+				&mut diff_up,
+				&mut rn.clone(),
+				&mut report_a,
+				&mut report_b,
+			);
+			Pg(&a).diff(
+				&Pg(&b),
+				&mut diff_down,
+				&mut rn.clone(),
+				&mut report_b,
+				&mut report_a,
+			);
 			(Some(diff_up), Some(diff_down))
 		}
 		_ => (None, None),

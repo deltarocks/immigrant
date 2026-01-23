@@ -9,19 +9,19 @@ use super::{
 	table::Table,
 };
 use crate::{
+	HasIdent, SchemaComposite, SchemaEnum, SchemaItem, SchemaScalar, SchemaSql, SchemaTable,
+	SchemaTableOrView, SchemaType, SchemaView,
 	composite::Composite,
 	diagnostics::{self, Report},
 	ids::{DbIdent, Ident},
 	mixin::Mixin,
 	names::{DbNativeType, DbTable, DbType, TableIdent, TypeIdent},
-	process::{check_unique_identifiers, check_unique_mixin_identifiers, NamingConvention, Pgnc},
+	process::{NamingConvention, Pgnc, check_unique_identifiers, check_unique_mixin_identifiers},
 	scalar::PropagatedScalarData,
 	sql::Sql,
 	uid::{RenameExt, RenameMap},
 	util::UniqueMap as _,
 	view::View,
-	HasIdent, SchemaComposite, SchemaEnum, SchemaItem, SchemaScalar, SchemaSql, SchemaTable,
-	SchemaTableOrView, SchemaType, SchemaView,
 };
 
 #[derive(derivative::Derivative)]
@@ -308,7 +308,7 @@ impl Schema {
 						schema: self,
 						scalar: v,
 					}
-					.native(rn, report)
+					.native(rn, report);
 				}
 				Item::Composite(c) if &c.id() == name => return c.db_type(rn),
 				_ => continue,

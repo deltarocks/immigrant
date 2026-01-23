@@ -48,7 +48,9 @@ pub enum Error {
 	#[error("missing migration with id {0}")]
 	IdHole(u32),
 
-	#[error("failed to find migrations directory at {0} or any parent directory. Have you forgot to init your project?")]
+	#[error(
+		"failed to find migrations directory at {0} or any parent directory. Have you forgot to init your project?"
+	)]
 	FailedToFindRoot(PathBuf),
 
 	#[error("failed to parse migration {id}: {error}")]

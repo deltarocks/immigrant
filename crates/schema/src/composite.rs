@@ -3,6 +3,7 @@ use std::{mem, ops::Deref};
 use itertools::{Either, Itertools};
 
 use crate::{
+	HasIdent, IsCompatible, SchemaComposite, SchemaType,
 	attribute::AttributeList,
 	column::ColumnAnnotation,
 	def_name_impls, derive_is_isomorph_by_id_name,
@@ -14,8 +15,7 @@ use crate::{
 	},
 	scalar::PropagatedScalarData,
 	sql::Sql,
-	uid::{next_uid, OwnUid, RenameExt, RenameMap},
-	HasIdent, IsCompatible, SchemaComposite, SchemaType,
+	uid::{OwnUid, RenameExt, RenameMap, next_uid},
 };
 
 #[derive(Debug)]

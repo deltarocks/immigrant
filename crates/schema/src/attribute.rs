@@ -96,10 +96,9 @@ impl AttributeList {
 		if v.len() > 1 {
 			return Err(DuplicateAttributeError.into());
 		}
-		match v.into_iter().next() { Some(v) => {
-			Ok(v)
-		} _ => {
-			T::try_from(AttributeValue::Unset)
-		}}
+		match v.into_iter().next() {
+			Some(v) => Ok(v),
+			_ => T::try_from(AttributeValue::Unset),
+		}
 	}
 }

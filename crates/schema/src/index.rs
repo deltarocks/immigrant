@@ -1,6 +1,10 @@
 use super::sql::Sql;
 use crate::{
-	db_name_impls, diagnostics::Report, ids::DbIdent, names::{ColumnIdent, ConstraintKind, DbColumn, DbNativeType, FieldIdent, IndexKind}, uid::{next_uid, OwnUid, RenameMap, Uid}, TableIndex
+	TableIndex, db_name_impls,
+	diagnostics::Report,
+	ids::DbIdent,
+	names::{ColumnIdent, ConstraintKind, DbColumn, DbNativeType, FieldIdent, IndexKind},
+	uid::{OwnUid, RenameMap, Uid, next_uid},
 };
 
 /// Can appear on columns, scalars, and tables.
@@ -184,7 +188,11 @@ impl TableIndex<'_> {
 			.iter()
 			.map(|f| (self.table.db_name(&f.0, rn), f.1.clone()))
 	}
-	pub fn db_types<'i>(&'i self, rn: &'i RenameMap, report: &'i mut Report) -> impl Iterator<Item = DbNativeType> + 'i {
+	pub fn db_types<'i>(
+		&'i self,
+		rn: &'i RenameMap,
+		report: &'i mut Report,
+	) -> impl Iterator<Item = DbNativeType> + 'i {
 		self.fields
 			.iter()
 			.map(|f| self.table.schema_column(f.0).db_type(rn, report))

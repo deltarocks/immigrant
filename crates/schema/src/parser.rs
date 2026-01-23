@@ -10,7 +10,7 @@ use crate::{
 	column::{Column, ColumnAnnotation, PartialForeignKey},
 	composite::{Composite, CompositeAnnotation, Field, FieldAnnotation},
 	diagnostics::Report,
-	ids::{in_allocator, DbIdent},
+	ids::{DbIdent, in_allocator},
 	index::{Check, Index, OpClass, PrimaryKey, UniqueConstraint, Using, With},
 	mixin::Mixin,
 	names::{
@@ -19,7 +19,7 @@ use crate::{
 	},
 	root::{Item, Schema, SchemaProcessOptions},
 	scalar::{Enum, EnumItem, InlineSqlType, InlineSqlTypePart, Scalar, ScalarAnnotation},
-	span::{register_source, SimpleSpan, SourceId},
+	span::{SimpleSpan, SourceId, register_source},
 	sql::{Sql, SqlOp, SqlUnOp},
 	table::{ForeignKey, OnDelete, Table, TableAnnotation},
 	uid::RenameMap,

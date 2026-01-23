@@ -1,8 +1,8 @@
 use std::{fmt, result, str::FromStr};
 
+use Error::*;
 use ouroboros::self_referencing;
 use patch::{Line, Patch};
-use Error::*;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

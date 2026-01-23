@@ -1,6 +1,6 @@
 use std::{cell::Cell, collections::HashMap};
 
-use crate::{ids::DbIdent, HasDefaultDbName};
+use crate::{HasDefaultDbName, ids::DbIdent};
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone, Copy)]
 pub struct Uid(usize);

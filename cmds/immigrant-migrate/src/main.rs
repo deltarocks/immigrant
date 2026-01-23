@@ -1,11 +1,11 @@
 use std::{env, env::current_dir, fs};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::Parser;
 use cli::{current_schema, display_reports, generate_sql, generate_sql_nowrite, stored_schema};
-use file_diffs::{find_root, list, Migration, MigrationId};
+use file_diffs::{Migration, MigrationId, find_root, list};
 use futures::StreamExt;
-use sqlx::{postgres::PgPoolOptions, Acquire, Executor, Postgres, Transaction};
+use sqlx::{Acquire, Executor, Postgres, Transaction, postgres::PgPoolOptions};
 use tracing::{error, warn};
 
 #[derive(Parser)]
@@ -176,15 +176,21 @@ async fn main() -> Result<()> {
 						} else {
 							had_mismatched_migrations = true;
 							mismatched_ids.push(id.id);
-							error!("schema, stored in DB, doesn't match the schema stored locally!\n\nLocal\n=====\n{check_str}\n\n\n\nRemote\n======\n{expected_schema}");
+							error!(
+								"schema, stored in DB, doesn't match the schema stored locally!\n\nLocal\n=====\n{check_str}\n\n\n\nRemote\n======\n{expected_schema}"
+							);
 						}
 					} else if unsafe_override_mismatched.contains(&id.id) {
-						bail!("migration is valid, but it is specified in --unsafe-override-mismatched")
+						bail!(
+							"migration is valid, but it is specified in --unsafe-override-mismatched"
+						)
 					}
 					continue 'next_migration;
 				}
 				if had_mismatched_migrations {
-					bail!("mismatched migrations found, can't continue with applying rest of local-only migrations\nMismatched: {mismatched_ids:?}");
+					bail!(
+						"mismatched migrations found, can't continue with applying rest of local-only migrations\nMismatched: {mismatched_ids:?}"
+					);
 				}
 				let mut path = path.to_owned();
 				path.push("up.sql");
@@ -192,7 +198,9 @@ async fn main() -> Result<()> {
 				run_migrations(&mut tx, id.id, sql, migrations_table, &check_str).await?;
 			}
 			if had_mismatched_migrations {
-				bail!("mismatched migrations found, can't continue with new migration generation\nMismatched: {mismatched_ids:?}");
+				bail!(
+					"mismatched migrations found, can't continue with new migration generation\nMismatched: {mismatched_ids:?}"
+				);
 			}
 			let id = list.last().map(|(id, _, _)| id.id + 1).unwrap_or_default();
 
@@ -249,7 +257,12 @@ async fn main() -> Result<()> {
 				&mut original_report,
 				&mut current_report,
 			)?;
-			if display_reports(&original_str, &current_str, original_report.clone(), current_report.clone()) {
+			if display_reports(
+				&original_str,
+				&current_str,
+				original_report.clone(),
+				current_report.clone(),
+			) {
 				bail!("errors are reported, cannot continue");
 			}
 			if let Err(e) = run_migrations(

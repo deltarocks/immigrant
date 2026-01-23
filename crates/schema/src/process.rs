@@ -9,6 +9,7 @@ use inflector::{cases::snakecase::to_snake_case, string::pluralize::to_plural};
 use itertools::{Either, Itertools};
 
 use crate::{
+	HasIdent, SchemaComposite, SchemaEnum, SchemaItem, SchemaTable,
 	composite::Composite,
 	diagnostics::Report,
 	ids::{DbIdent, Ident},
@@ -19,7 +20,7 @@ use crate::{
 	table::{Table, TableAnnotation},
 	uid::{RenameExt, RenameMap},
 	view::View,
-	w, HasIdent, SchemaComposite, SchemaEnum, SchemaItem, SchemaTable,
+	w,
 };
 
 /// Can be updated in database source code, and some are already doing that,
@@ -57,7 +58,7 @@ impl<T> DerefMut for Pgnc<T> {
 impl Pgnc<&mut Schema> {
 	// TODO: Split into merge and renaming phases, so that renames may work with `SchemaItem` instead of raw `Item`?
 	pub fn process_naming(&mut self, rn: &mut RenameMap) {
-		for item in self.0 .0.iter_mut() {
+		for item in self.0.0.iter_mut() {
 			match item {
 				Item::Table(t) => {
 					let mut t = Pgnc(t);

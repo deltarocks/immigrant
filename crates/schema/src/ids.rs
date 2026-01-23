@@ -1,7 +1,7 @@
 use std::{
 	cell::{Cell, RefCell},
 	cmp::Ordering,
-	collections::{hash_map::Entry, HashMap},
+	collections::{HashMap, hash_map::Entry},
 	fmt::{self, Debug, Display},
 	hash::{Hash, Hasher},
 	marker::PhantomData,
@@ -66,7 +66,7 @@ impl CodeIdentAllocator {
 					id: *v.get(),
 					span,
 					_marker: PhantomData,
-				}
+				};
 			}
 			Entry::Vacant(v) => {
 				let id = self.max_id.get();

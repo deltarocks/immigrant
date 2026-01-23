@@ -40,19 +40,12 @@ fn highlight(b: &mut SnippetBuilder) {
 		tree_sitter_immigrant::LOCALS_QUERY,
 	)
 	.expect("highlight configuration is valid");
-	config.configure(&[
-		"punctuation.bracket",
-		"keyword",
-		"property",
-		"type",
-	]);
-	b.highlight(config, |name, _str| {
-		match name {
-			1 => Formatting::rgb([255, 50, 50]),
-			2 => Formatting::rgb([50, 150, 50]),
-			3 => Formatting::rgb([120, 150, 50]),
-			_ => Formatting::listchar(),
-		}
+	config.configure(&["punctuation.bracket", "keyword", "property", "type"]);
+	b.highlight(config, |name, _str| match name {
+		1 => Formatting::rgb([255, 50, 50]),
+		2 => Formatting::rgb([50, 150, 50]),
+		3 => Formatting::rgb([120, 150, 50]),
+		_ => Formatting::listchar(),
 	});
 }
 

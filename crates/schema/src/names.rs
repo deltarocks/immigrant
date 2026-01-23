@@ -1,9 +1,9 @@
 use std::fmt::{self, Debug};
 
 use crate::{
+	HasDefaultDbName, HasIdent,
 	ids::{DbIdent, Ident, Kind},
 	span::SimpleSpan,
-	HasDefaultDbName, HasIdent,
 };
 
 macro_rules! def_kind {

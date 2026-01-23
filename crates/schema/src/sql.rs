@@ -1,9 +1,9 @@
 use crate::{
+	HasIdent, SchemaItem, SchemaType,
 	diagnostics::Report,
 	ids::{DbIdent, Ident},
 	names::{ColumnIdent, DbProcedure, FieldIdent, FieldKind, TypeIdent, TypeKind},
 	uid::{RenameExt, RenameMap},
-	HasIdent, SchemaItem, SchemaType,
 };
 
 #[derive(Debug, Clone)]

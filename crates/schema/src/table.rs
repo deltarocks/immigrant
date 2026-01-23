@@ -4,6 +4,7 @@ use itertools::Itertools;
 
 use super::column::Column;
 use crate::{
+	HasIdent, Index, SchemaTable, TableColumn, TableForeignKey, TableIndex, TableItem,
 	attribute::AttributeList,
 	db_name_impls, def_name_impls,
 	diagnostics::Report,
@@ -14,8 +15,8 @@ use crate::{
 		TableDefName, TableIdent, TableKind, TypeIdent,
 	},
 	scalar::PropagatedScalarData,
-	uid::{next_uid, OwnUid, RenameExt, RenameMap, Uid},
-	w, HasIdent, Index, SchemaTable, TableColumn, TableForeignKey, TableIndex, TableItem,
+	uid::{OwnUid, RenameExt, RenameMap, Uid, next_uid},
+	w,
 };
 
 #[derive(Debug)]
