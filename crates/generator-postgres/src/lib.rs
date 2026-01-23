@@ -6,6 +6,10 @@ use std::{
 
 use itertools::Itertools;
 use schema::{
+	ChangeList, ColumnDiff, Diff, EnumDiff, HasDefaultDbName, HasIdent, HasUid, IsCompatible,
+	IsIsomorph, SchemaComposite, SchemaDiff, SchemaEnum, SchemaItem, SchemaScalar, SchemaSql,
+	SchemaTable, SchemaTableOrView, SchemaType, SchemaView, TableCheck, TableColumn, TableDiff,
+	TableForeignKey, TableIndex, TablePrimaryKey, TableSql, TableUniqueConstraint,
 	diagnostics::Report,
 	ids::{DbIdent, Ident},
 	index::Check,
@@ -20,10 +24,7 @@ use schema::{
 	sql::{Sql, SqlOp},
 	uid::{RenameExt, RenameMap},
 	view::DefinitionPart,
-	w, wl, ChangeList, ColumnDiff, Diff, EnumDiff, HasDefaultDbName, HasIdent, HasUid,
-	IsCompatible, IsIsomorph, SchemaComposite, SchemaDiff, SchemaEnum, SchemaItem, SchemaScalar,
-	SchemaSql, SchemaTable, SchemaTableOrView, SchemaType, SchemaView, TableCheck, TableColumn,
-	TableDiff, TableForeignKey, TableIndex, TablePrimaryKey, TableSql, TableUniqueConstraint,
+	w, wl,
 };
 
 use crate::escape::escape_identifier;
@@ -1933,26 +1934,43 @@ impl Pg<SchemaView<'_>> {
 					w!(sql, "{r}")
 				}
 				DefinitionPart::TableRef(t) => {
-					let Some(table) = self.schema.schema_table_or_view(t) else {
-						panic!("referenced table not found: {t:?}");
-					};
-					match table {
-						SchemaTableOrView::Table(t) => {
-							w!(sql, "{}", Id(t.db(rn)))
+					if let Some(table) = self.schema.schema_table_or_view(t) {
+						match table {
+							SchemaTableOrView::Table(t) => {
+								w!(sql, "{}", Id(t.db(rn)))
+							}
+							SchemaTableOrView::View(v) => {
+								w!(sql, "{}", Id(v.db(rn)))
+							}
 						}
-						SchemaTableOrView::View(v) => {
-							w!(sql, "{}", Id(v.db(rn)))
-						}
+					} else {
+						report
+							.error("referenced table not found")
+							.annotate("referenced here", t.span());
+						w!(sql, "ERROR")
 					}
 				}
 				DefinitionPart::ColumnRef(t, c) => {
-					let table = self.schema.schema_table(t).expect("referenced");
-					if let Some(db) =
-						Sql::context_ident_name(&SchemaItem::Table(table), *c, rn, report)
-					{
-						let db = Id(db);
-						w!(sql, "{db}")
+					if let Some(table) = self.schema.schema_table_or_view(t) {
+						if let SchemaTableOrView::Table(table) = table {
+							if let Some(db) =
+								Sql::context_ident_name(&SchemaItem::Table(table), *c, rn, report)
+							{
+								let db = Id(db);
+								w!(sql, "{db}")
+							} else {
+								w!(sql, "ERROR")
+							}
+						} else {
+							report
+								.error("column references only work on tables, not on views")
+								.annotate("referenced here", c.span());
+							w!(sql, "ERROR")
+						}
 					} else {
+						report
+							.error("referenced table not found")
+							.annotate("referenced here", t.span());
 						w!(sql, "ERROR")
 					}
 				}
@@ -2208,8 +2226,8 @@ mod tests {
 
 	use schema::diagnostics::Report;
 	use schema::{
-		parser::parse, process::NamingConvention, root::SchemaProcessOptions, uid::RenameMap, wl,
-		Diff,
+		Diff, parser::parse, process::NamingConvention, root::SchemaProcessOptions, uid::RenameMap,
+		wl,
 	};
 	use tempfile::NamedTempFile;
 	use tracing_test::traced_test;
