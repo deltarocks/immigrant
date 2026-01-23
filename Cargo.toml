@@ -17,7 +17,7 @@ cli = { version = "0.2.0", package = "immigrant-cli", path = "crates/cli" }
 generator-postgres = { version = "0.2.0", package = "immigrant-generator-postgres", path = "crates/generator-postgres" }
 anyhow = "1.0.100"
 hi-doc = "0.3.0"
-imara-diff = "0.2.0"
+imara-diff = { git = "https://github.com/pascalkuthe/imara-diff" }
 ouroboros = "0.18.5"
 patch = "0.7.0"
 thiserror = "2.0.17"
