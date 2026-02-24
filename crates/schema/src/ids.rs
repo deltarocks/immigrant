@@ -2,7 +2,7 @@ use std::{
 	cell::{Cell, RefCell},
 	cmp::Ordering,
 	collections::{HashMap, hash_map::Entry},
-	fmt::{self, Debug, Display},
+	fmt::{self, Debug},
 	hash::{Hash, Hasher},
 	marker::PhantomData,
 };
@@ -44,18 +44,12 @@ impl CodeIdentAllocator {
 	fn ident<K: Kind>(&self, span: SimpleSpan, name: &str) -> Ident<K> {
 		let kind = K::id();
 		self.max_kind.set(self.max_kind.get().max(kind));
+		#[cfg(feature = "strict")]
 		let kind = {
-			#[cfg(feature = "strict")]
-			{
-				self.generation
-					.get()
-					.checked_add(kind)
-					.expect("out of kinds")
-			}
-			#[cfg(not(feature = "strict"))]
-			{
-				0
-			}
+			self.generation
+				.get()
+				.checked_add(kind)
+				.expect("out of kinds")
 		};
 		let mut ids = self.ids.borrow_mut();
 		match ids.entry(name.to_owned()) {

@@ -11,7 +11,7 @@ use crate::{
 	index::{Check, PrimaryKey, UniqueConstraint},
 	mixin::Mixin,
 	names::{
-		ColumnIdent, DbColumn, DbForeignKey, DbNativeType, DefName, ForeignKeyKind, MixinIdent,
+		ColumnIdent, DbColumn, DbForeignKey, DbNativeType, ForeignKeyKind, MixinIdent,
 		TableDefName, TableIdent, TableKind, TypeIdent,
 	},
 	scalar::PropagatedScalarData,

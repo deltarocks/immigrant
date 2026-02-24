@@ -39,6 +39,7 @@ enum Subcommand {
 	Apply,
 }
 
+/// Immigrant helper to apply migrations to database
 #[derive(Parser)]
 #[clap(author, version)]
 struct Opts {

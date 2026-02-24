@@ -622,8 +622,8 @@ impl IsIsomorph for Pg<TableIndex<'_>> {
 		&self,
 		other: &Self,
 		rn: &RenameMap,
-		report_self: &mut Report,
-		report_other: &mut Report,
+		_report_self: &mut Report,
+		_report_other: &mut Report,
 	) -> bool {
 		let old_fields = self.db_columns(rn).collect_vec();
 		let new_fields = other.db_columns(rn).collect_vec();
@@ -637,8 +637,8 @@ impl IsCompatible for Pg<TableIndex<'_>> {
 		&self,
 		new: &Self,
 		rn: &RenameMap,
-		report_self: &mut Report,
-		report_other: &mut Report,
+		_report_self: &mut Report,
+		_report_other: &mut Report,
 	) -> bool {
 		let old_column_opclass = self.db_columns_opclass(rn).collect_vec();
 		let new_column_opclass = new.db_columns_opclass(rn).collect_vec();

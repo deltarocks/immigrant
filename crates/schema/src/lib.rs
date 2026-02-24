@@ -242,31 +242,31 @@ pub enum SchemaItem<'a> {
 }
 derive_is_isomorph_by_id_name!(SchemaItem<'_>);
 impl SchemaItem<'_> {
-	pub fn as_enum(&self) -> Option<SchemaEnum> {
+	pub fn as_enum(&'_ self) -> Option<SchemaEnum<'_>> {
 		match self {
 			Self::Enum(e) => Some(*e),
 			_ => None,
 		}
 	}
-	pub fn as_scalar(&self) -> Option<SchemaScalar> {
+	pub fn as_scalar(&'_ self) -> Option<SchemaScalar<'_>> {
 		match self {
 			Self::Scalar(e) => Some(*e),
 			_ => None,
 		}
 	}
-	pub fn as_composite(&self) -> Option<SchemaComposite> {
+	pub fn as_composite(&'_ self) -> Option<SchemaComposite<'_>> {
 		match self {
 			Self::Composite(e) => Some(*e),
 			_ => None,
 		}
 	}
-	pub fn as_table(&self) -> Option<SchemaTable> {
+	pub fn as_table(&'_ self) -> Option<SchemaTable<'_>> {
 		match self {
 			Self::Table(e) => Some(*e),
 			_ => None,
 		}
 	}
-	pub fn as_type(&self) -> Option<SchemaType> {
+	pub fn as_type(&'_ self) -> Option<SchemaType<'_>> {
 		Some(match self {
 			SchemaItem::Enum(e) => SchemaType::Enum(*e),
 			SchemaItem::Scalar(s) => SchemaType::Scalar(*s),
@@ -274,7 +274,7 @@ impl SchemaItem<'_> {
 			_ => return None,
 		})
 	}
-	pub fn as_view(&self) -> Option<SchemaView> {
+	pub fn as_view(&'_ self) -> Option<SchemaView<'_>> {
 		match self {
 			Self::View(e) => Some(*e),
 			_ => None,
@@ -456,7 +456,7 @@ impl SchemaTable<'_> {
 			value: pk,
 		})
 	}
-	pub fn checks(&self) -> impl Iterator<Item = TableCheck> {
+	pub fn checks(&'_ self) -> impl Iterator<Item = TableCheck<'_>> {
 		self.annotations
 			.iter()
 			.filter_map(TableAnnotation::as_check)
@@ -465,7 +465,7 @@ impl SchemaTable<'_> {
 				value,
 			})
 	}
-	pub fn unique_constraints(&self) -> impl Iterator<Item = TableUniqueConstraint> {
+	pub fn unique_constraints(&'_ self) -> impl Iterator<Item = TableUniqueConstraint<'_>> {
 		self.annotations
 			.iter()
 			.filter_map(TableAnnotation::as_unique_constraint)

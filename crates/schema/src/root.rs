@@ -12,8 +12,8 @@ use crate::{
 	HasIdent, SchemaComposite, SchemaEnum, SchemaItem, SchemaScalar, SchemaSql, SchemaTable,
 	SchemaTableOrView, SchemaType, SchemaView,
 	composite::Composite,
-	diagnostics::{self, Report},
-	ids::{DbIdent, Ident},
+	diagnostics::Report,
+	ids::Ident,
 	mixin::Mixin,
 	names::{DbNativeType, DbTable, DbType, TableIdent, TypeIdent},
 	process::{NamingConvention, Pgnc, check_unique_identifiers, check_unique_mixin_identifiers},
@@ -381,7 +381,7 @@ impl Schema {
 	pub fn db_enums(&self, rn: &RenameMap) -> Vec<DbType> {
 		self.enums().map(|t| t.db(rn)).collect()
 	}
-	pub fn sql<'a>(&'a self, sql: &'a Sql) -> SchemaSql<'_> {
+	pub fn sql<'a>(&'a self, sql: &'a Sql) -> SchemaSql<'a> {
 		SchemaSql { schema: self, sql }
 	}
 }

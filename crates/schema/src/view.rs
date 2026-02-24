@@ -2,7 +2,7 @@ use crate::{
 	attribute::AttributeList,
 	def_name_impls,
 	names::{ColumnIdent, TableIdent, ViewDefName, ViewKind},
-	uid::{OwnUid, Uid, next_uid},
+	uid::{OwnUid, next_uid},
 };
 
 #[derive(Debug)]

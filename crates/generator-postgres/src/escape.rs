@@ -13,9 +13,9 @@
 /// If input contains backslashes, result will be of the form `
 /// E'...'` so it is safe to use regardless of the setting of
 /// standard_conforming_strings.
-pub fn escape_literal(input: &str) -> String {
-	escape_internal(input, false)
-}
+// pub fn escape_literal(input: &str) -> String {
+// 	escape_internal(input, false)
+// }
 
 /// Immigrant addition: keyword list
 /// Extracted using gen_keywordlist.pl, all not marked as non-reserved;

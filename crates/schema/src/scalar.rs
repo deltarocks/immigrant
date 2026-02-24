@@ -40,6 +40,7 @@ derive_is_isomorph_by_id_name!(EnumItem);
 /// FIXME: Rename to EnumItem, rename old EnumItem to Variant
 #[derive(Debug, Clone, Copy)]
 pub struct EnumItemHandle<'a> {
+	#[allow(dead_code)]
 	enum_: SchemaEnum<'a>,
 	item: &'a EnumItem,
 }
