@@ -10,6 +10,7 @@ use tracing::{error, warn};
 
 #[derive(Parser)]
 enum Subcommand {
+	/// Execute migrations, execute and commit pending migration
 	Commit {
 		/// How to name the change.
 		///
@@ -17,31 +18,41 @@ enum Subcommand {
 		// FIXME: Duplicates way too many code from `immigrant commit`
 		#[clap(long, short = 'm')]
 		message: Option<String>,
+		/// What SQL code should be added before executing the immigrant diff.
 		#[clap(long)]
 		before_up_sql: Option<String>,
+		/// What SQL code should be added after executing the immigrant diff.
 		#[clap(long)]
 		after_up_sql: Option<String>,
+		/// What SQL code should be added before reverting the immigrant diff.
 		#[clap(long)]
 		before_down_sql: Option<String>,
+		/// What SQL code should be added after reverting the immigrant diff.
 		#[clap(long)]
 		after_down_sql: Option<String>,
-		#[clap(long)]
-		dry_run: bool,
-		#[clap(long)]
-		check_only: bool,
-		#[clap(long)]
-		unsafe_override_mismatched: Vec<u32>,
-		/// If true - migration should be saved to disk.
-		/// Always set if not in dry-run mode, in dry-run it is disabled by default.
+		/// If set in dry-run mode, pending migration is written to disk on success, otherwise it
+		/// will only be checked.
 		#[clap(long)]
 		write: bool,
 	},
+	/// Execute migrations
+	Apply,
 }
+
 #[derive(Parser)]
 #[clap(author, version)]
 struct Opts {
+	/// Which table should be used to keep immigrant own migration apply status
 	#[arg(long, default_value = "__immigrant_migrations")]
 	migrations_table: String,
+	/// If set - sql is executed in transaction, which is rolled back immediately.
+	#[clap(long)]
+	dry_run: bool,
+	/// If migration schema was changed on disk for some reason - migration will fail
+	/// this argument allows to ignore such migrations.
+	#[clap(long)]
+	unsafe_override_mismatched: Vec<u32>,
+	/// Action to execute
 	#[command(subcommand)]
 	cmd: Subcommand,
 }
@@ -126,93 +137,108 @@ async fn main() -> Result<()> {
 	let mut had_mismatched_migrations = false;
 	let mut mismatched_ids = vec![];
 
+	// TODO: Option to disable top-level transaction
+	let mut tx = conn.begin().await?;
+	let root = find_root(&current_dir()?).context("failed to discover root")?;
+	let list = list(&root).context("failed to list migrations")?;
+
+	'next_migration: for (id, schema, path) in &list {
+		let check_str = schema.schema_check_string();
+		'run_migration: {
+			let Some(first_version) = first_version else {
+				// No migrations were ran yet,
+				break 'run_migration;
+			};
+			let Some(ran_id) = id.id.checked_sub(first_version) else {
+				// Migration version was removed from DB, yet it was run.
+				continue 'next_migration;
+			};
+			let Some(migration) = ran_migrations.get_mut(ran_id as usize) else {
+				// This migration was not yet ran
+				break 'run_migration;
+			};
+			let Some(expected_schema) = &migration.schema else {
+				// No stored expected schema, continue with migration
+				continue 'next_migration;
+			};
+			if expected_schema.trim() != check_str.trim() {
+				if opts.unsafe_override_mismatched.contains(&id.id) {
+					warn!("overriding migration {id:?}");
+					sqlx::query("UPDATE __immigrant_migrations SET schema = $1 WHERE version = $2")
+						.bind(&check_str)
+						.bind(id.id as i32)
+						.execute(&mut *tx)
+						.await?;
+					migration.schema = Some(check_str);
+				} else {
+					had_mismatched_migrations = true;
+					mismatched_ids.push(id.id);
+					error!(
+						"schema, stored in DB, doesn't match the schema stored locally!\n\nLocal\n=====\n{check_str}\n\n\n\nRemote\n======\n{expected_schema}"
+					);
+				}
+			} else if opts.unsafe_override_mismatched.contains(&id.id) {
+				bail!("migration is valid, but it is specified in --unsafe-override-mismatched")
+			}
+			continue 'next_migration;
+		}
+		if had_mismatched_migrations {
+			bail!(
+				"mismatched migrations found, can't continue with applying rest of local-only migrations\nMismatched: {mismatched_ids:?}"
+			);
+		}
+		let mut path = path.to_owned();
+		path.push("up.sql");
+		let sql = fs::read_to_string(&path).context("reading migration up.sql file")?;
+		run_migrations(&mut tx, id.id, sql, migrations_table, &check_str).await?;
+	}
+	if had_mismatched_migrations {
+		bail!(
+			"mismatched migrations found, can't continue with new migration generation\nMismatched: {mismatched_ids:?}"
+		);
+	}
+	let id = list.last().map(|(id, _, _)| id.id + 1).unwrap_or_default();
+
+	let (original_str, original, mut original_report, orig_rn) =
+		stored_schema(&list).context("failed to load past migrations")?;
+
+	let (current_str, current, mut current_report, current_rn) =
+		current_schema(&root).context("failed to parse current schema")?;
+
+	let mut rn = orig_rn;
+	rn.merge(current_rn);
+
 	match opts.cmd {
+		Subcommand::Apply => {
+			let mut migration = Migration::new(
+				"pending_check".to_owned(),
+				"pending_check".to_owned(),
+				None,
+				None,
+				None,
+				None,
+				current_str.clone(),
+			);
+
+			migration.to_diff(original_str.clone())?;
+
+			if !migration.is_noop() {
+				bail!("Dirty database schema, not applying");
+			}
+			if !opts.dry_run {
+				tx.commit().await?;
+			} else {
+				println!("Dry-run succeeded");
+			}
+		}
 		Subcommand::Commit {
 			message,
 			before_up_sql,
 			after_up_sql,
 			before_down_sql,
 			after_down_sql,
-			dry_run,
-			check_only,
 			write,
-			unsafe_override_mismatched,
 		} => {
-			// TODO: Option to disable top-level transaction
-			let mut tx = conn.begin().await?;
-			let root = find_root(&current_dir()?).context("failed to discover root")?;
-			let list = list(&root).context("failed to list migrations")?;
-
-			'next_migration: for (id, schema, path) in &list {
-				let check_str = schema.schema_check_string();
-				'run_migration: {
-					let Some(first_version) = first_version else {
-						// No migrations were ran yet,
-						break 'run_migration;
-					};
-					let Some(ran_id) = id.id.checked_sub(first_version) else {
-						// Migration version was removed from DB, yet it was run.
-						continue 'next_migration;
-					};
-					let Some(migration) = ran_migrations.get_mut(ran_id as usize) else {
-						// This migration was not yet ran
-						break 'run_migration;
-					};
-					let Some(expected_schema) = &migration.schema else {
-						// No stored expected schema, continue with migration
-						continue 'next_migration;
-					};
-					if expected_schema.trim() != check_str.trim() {
-						if unsafe_override_mismatched.contains(&id.id) {
-							warn!("overriding migration {id:?}");
-							sqlx::query(
-								"UPDATE __immigrant_migrations SET schema = $1 WHERE version = $2",
-							)
-							.bind(&check_str)
-							.bind(id.id as i32)
-							.execute(&mut *tx)
-							.await?;
-							migration.schema = Some(check_str);
-						} else {
-							had_mismatched_migrations = true;
-							mismatched_ids.push(id.id);
-							error!(
-								"schema, stored in DB, doesn't match the schema stored locally!\n\nLocal\n=====\n{check_str}\n\n\n\nRemote\n======\n{expected_schema}"
-							);
-						}
-					} else if unsafe_override_mismatched.contains(&id.id) {
-						bail!(
-							"migration is valid, but it is specified in --unsafe-override-mismatched"
-						)
-					}
-					continue 'next_migration;
-				}
-				if had_mismatched_migrations {
-					bail!(
-						"mismatched migrations found, can't continue with applying rest of local-only migrations\nMismatched: {mismatched_ids:?}"
-					);
-				}
-				let mut path = path.to_owned();
-				path.push("up.sql");
-				let sql = fs::read_to_string(&path).context("reading migration up.sql file")?;
-				run_migrations(&mut tx, id.id, sql, migrations_table, &check_str).await?;
-			}
-			if had_mismatched_migrations {
-				bail!(
-					"mismatched migrations found, can't continue with new migration generation\nMismatched: {mismatched_ids:?}"
-				);
-			}
-			let id = list.last().map(|(id, _, _)| id.id + 1).unwrap_or_default();
-
-			let (original_str, original, mut original_report, orig_rn) =
-				stored_schema(&list).context("failed to load past migrations")?;
-
-			let (current_str, current, mut current_report, current_rn) =
-				current_schema(&root).context("failed to parse current schema")?;
-
-			let mut rn = orig_rn;
-			rn.merge(current_rn);
-
 			let should_use_editor = message.is_none();
 
 			let message = message.unwrap_or_default();
@@ -241,12 +267,10 @@ async fn main() -> Result<()> {
 			if migration.is_noop() {
 				println!("No changes found");
 				// Still need to preserve previous migrations state.
-				if !dry_run {
+				if !opts.dry_run {
 					tx.commit().await?;
 				}
 				return Ok(());
-			} else if check_only {
-				bail!("unexpected unapplied migration: {migration}");
 			}
 
 			let (sql, _) = generate_sql_nowrite(
@@ -281,21 +305,26 @@ async fn main() -> Result<()> {
 			let mut dir = root.clone();
 			dir.push(&id.dirname);
 
-			if !dry_run || write {
+			if !opts.dry_run {
 				fs::create_dir(&dir).context("creating migration directory")?;
 
-				{
-					let mut schema_update = dir.to_owned();
-					schema_update.push("db.update");
-					fs::write(schema_update, migration.to_string()).context("writing db.update")?;
-				}
+				let mut schema_update = dir.to_owned();
+				schema_update.push("db.update");
+				fs::write(schema_update, migration.to_string()).context("writing db.update")?;
 			}
-			if !dry_run {
+			if !opts.dry_run {
 				tx.commit().await?;
 			} else {
 				println!("Dry-run succeeded");
 			}
-			if !dry_run || write {
+			if opts.dry_run && write {
+				fs::create_dir(&dir).context("creating migration directory")?;
+
+				let mut schema_update = dir.to_owned();
+				schema_update.push("db.update");
+				fs::write(schema_update, migration.to_string()).context("writing db.update")?;
+			}
+			if !opts.dry_run || write {
 				generate_sql(
 					&migration,
 					&original_str,
