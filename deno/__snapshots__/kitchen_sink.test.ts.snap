@@ -1,0 +1,18 @@
+export const snapshot = {};
+
+snapshot[`kitchenSink 1`] = `
+'scalar created_at = sql"TIMESTAMPTZ" now();
+scalar user_name = sql"TEXT";
+scalar group_id = sql"TEXT";
+@inline
+scalar user_id = sql"TEXT";
+table Group {
+	group_id @primary_key;
+};
+table User {
+	user_id @primary_key;
+	group: group_id ~ Group (group_id);
+	user_name?;
+	created_at;
+};'
+`;
