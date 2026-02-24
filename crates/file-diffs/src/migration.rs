@@ -137,7 +137,7 @@ impl FromStr for Migration {
 			let schema_diff = until_next_header(&mut lines);
 			MigrationSchemaDiff::Diff(OwnedPatch::from_str(&schema_diff)?)
 		} else if lines.next_if_eq(&"## Schema reset").is_some() {
-			let schema_diff = until_next_header(&mut lines);
+			let schema_diff = code_block(&mut lines);
 			MigrationSchemaDiff::Reset(schema_diff)
 		} else {
 			MigrationSchemaDiff::None
@@ -189,7 +189,9 @@ impl fmt::Display for Migration {
 			MigrationSchemaDiff::Reset(reset) => {
 				writeln!(f)?;
 				writeln!(f, "## Schema reset")?;
+				writeln!(f, "```immigrant")?;
 				writeln!(f, "{reset}")?;
+				writeln!(f, "```")?;
 				writeln!(f)?;
 			}
 			MigrationSchemaDiff::Diff(diff) => {
@@ -227,6 +229,18 @@ fn skip_empty(l: &mut Peekable<Lines>) {
 	if l.peek().map(|l| l.is_empty()).unwrap_or(false) {
 		l.next();
 	}
+}
+fn code_block(l: &mut Peekable<Lines>) -> String {
+	let mut out = Vec::new();
+	assert_eq!(l.next(), Some("```immigrant"));
+	loop {
+		let Some(line) = l.next_if(|l| *l != "```") else {
+			break;
+		};
+		out.push(line);
+	}
+	assert_eq!(l.next(), Some("```"));
+	out.join("\n")
 }
 fn until_next_header(l: &mut Peekable<Lines>) -> String {
 	let mut out = Vec::new();
