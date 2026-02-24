@@ -1,0 +1,64 @@
+
+= Foreign Keys
+
+== Inline (column-level)
+
+Append `~` after column definition to declare a foreign key:
+
+[source,immigrant]
+----
+table Post {
+    /// References User table, target column resolved by name (user_id)
+    user_id ~ User;
+
+    /// Explicit target column
+    user_id ~ User(id);
+
+    /// With ON DELETE action
+    user_id ~.cascade User;
+
+    /// Named foreign key
+    user_id "fk_author" ~.cascade User;
+};
+----
+
+== Standalone (table-level)
+
+For composite foreign keys or when source/target columns differ:
+
+[source,immigrant]
+----
+table AccessTokenScope {
+    access_token ~.cascade AccessToken;
+    audience_id ~.cascade Audience;
+    scope_id;
+
+    @primary_key(access_token, audience_id, scope_id);
+    (audience_id, scope_id) ~.cascade AudienceScope;
+    (authorization_code, audience_id) "aud_fk" ~.cascade AuthorizationCodeAudience;
+};
+----
+
+== ON DELETE actions
+
+Specified with `.action` after `~`:
+
+[cols="1,3"]
+|===
+|Action |SQL
+
+|`.cascade`
+|`ON DELETE CASCADE`
+
+|`.restrict`
+|`ON DELETE RESTRICT`
+
+|`.set_null`
+|`ON DELETE SET NULL`
+
+|`.set_default`
+|`ON DELETE SET DEFAULT`
+
+|`.noop`
+|`ON DELETE NO ACTION` (default if omitted)
+|===

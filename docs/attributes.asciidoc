@@ -1,0 +1,184 @@
+
+= Attributes
+
+Attributes are prefixed with `@` and modify column or table behavior.
+
+== @primary_key
+
+[source,immigrant]
+----
+table Example {
+    /// Single-column primary key
+    user_id @primary_key;
+
+    /// Named primary key
+    user_id @primary_key "custom_pk_name";
+
+    /// Composite primary key (table-level)
+    @primary_key(user_id, role);
+
+    /// Named composite primary key
+    @primary_key "my_pk" (user_id, role);
+};
+----
+
+Multiple columns with `@primary_key` at column level merge into a single composite primary key:
+
+[source,immigrant]
+----
+table Example {
+    a: sql"INTEGER" @primary_key;
+    b: sql"INTEGER" @primary_key;
+    /// Result: PRIMARY KEY(a, b)
+};
+----
+
+== @unique
+
+[source,immigrant]
+----
+table Example {
+    email @unique;
+    email @unique "unique_email";
+
+    /// Composite unique constraint (table-level)
+    @unique(user_id, email);
+    @unique "uq_user_email" (user_id, email);
+};
+----
+
+== @check
+
+CHECK constraints use SQL expressions. `_` is a placeholder for the column value:
+
+[source,immigrant]
+----
+table Example {
+    age: sql"INTEGER" @check(_ >= 0);
+    name: sql"TEXT" @check(char_length(_) > 0);
+};
+----
+
+Named checks:
+
+[source,immigrant]
+----
+table Example {
+    age: sql"INTEGER" @check "age_positive" (_ >= 0);
+};
+----
+
+Table-level checks can reference any column by name:
+
+[source,immigrant]
+----
+table Example {
+    lo: sql"INTEGER";
+    hi: sql"INTEGER";
+    @check "valid_range" (lo <= hi);
+};
+----
+
+Checks with the same name are merged with AND:
+
+[source,immigrant]
+----
+scalar test = sql"TEXT" @inline @check "testcheck" (_ != '1');
+
+table Foo {
+    test @check "testcheck" (_ != '2');
+    /// Produces: CHECK (test <> '1' AND test <> '2')
+};
+----
+
+== @default
+
+Sets column default value using SQL expression:
+
+[source,immigrant]
+----
+table Example {
+    created_at: sql"TIMESTAMPTZ" @default(NOW());
+    active: sql"BOOLEAN" @default(true);
+    counter: sql"INTEGER" @default(0);
+};
+----
+
+== @initialize_as
+
+Like `@default`, but intended for populating columns at creation time. Can reference other columns and cast expressions:
+
+[source,immigrant]
+----
+table Example {
+    scope_id: builtin_scope @initialize_as(scope_id::builtin_scope);
+    public: bool @initialize_as(false);
+};
+----
+
+== @index
+
+[source,immigrant]
+----
+table Example {
+    user_id @index;
+    user_id @index "custom_index_name";
+};
+----
+
+Index options for specialized indexes (GiST, GIN, IVFFlat, etc.):
+
+[source,immigrant]
+----
+table Example {
+    /// Operator class
+    embedding @index.opclass(vector_cosine_ops);
+
+    /// Index method
+    embedding @index.using(ivfflat);
+
+    /// Combined
+    embedding @index.opclass(vector_cosine_ops).using(ivfflat);
+};
+----
+
+Named indexes merge columns. Columns sharing an index name end up in the same index:
+
+[source,immigrant]
+----
+table Example {
+    a: sql"INTEGER" @index "composite_idx";
+    b: sql"INTEGER" @index "composite_idx";
+    /// Result: CREATE INDEX composite_idx ON table(a, b)
+};
+----
+
+== @external
+
+On tables, prevents immigrant from generating CREATE/DROP TABLE. Useful for referencing tables managed outside immigrant:
+
+[source,immigrant]
+----
+table External {
+    id: sql"INTEGER";
+    @external;
+};
+----
+
+On scalars, same effect:
+
+[source,immigrant]
+----
+scalar existing_type = sql"TEXT" @external;
+----
+
+== @inline
+
+On scalars, skips domain creation and expands raw SQL type at point of use:
+
+[source,immigrant]
+----
+scalar non_zero_int = sql"INTEGER" @check(_ != 0) @inline;
+----
+
+Columns using `non_zero_int` get type `INTEGER` with a CHECK constraint directly on the table. No domain is created.

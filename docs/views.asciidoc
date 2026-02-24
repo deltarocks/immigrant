@@ -1,0 +1,26 @@
+
+= Views
+
+Views wrap a SQL query. Use `{TableName}` to reference tables and `{TableName.column}` to reference columns. Immigrant substitutes actual database names:
+
+[source,immigrant]
+----
+view ActiveUsers = sql"""
+    SELECT * FROM {User}
+    WHERE {User.active} = true
+""";
+----
+
+Materialized views use `view.materialized`:
+
+[source,immigrant]
+----
+view.materialized UserStats = sql"""
+    SELECT {User.user_id}, count(*) as post_count
+    FROM {User}
+    JOIN {Post} ON {Post.user_id} = {User.user_id}
+    GROUP BY {User.user_id}
+""";
+----
+
+When referenced tables or columns are renamed, immigrant automatically recreates the view with updated names.

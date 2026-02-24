@@ -1,0 +1,70 @@
+
+= SQL Expression Language
+
+Used in `@check`, `@default`, and `@initialize_as`. This is not raw SQL. Immigrant has its own expression syntax that compiles to SQL.
+
+== Operators
+
+[cols="1,2,2"]
+|===
+|Precedence |Operator |SQL equivalent
+
+|Highest
+|`-x`, `+x`, `!x`
+|`-`, `+`, `NOT`
+
+|
+|`*`, `/`, `%`
+|`*`, `/`, `%`
+
+|
+|`+`, `-`
+|`+`, `-`
+
+|
+|`<`, `>`, `\<=`, `>=`
+|same
+
+|
+|`~~`
+|`LIKE`
+
+|
+|`==`, `!=`
+|`=`, `<>`
+
+|
+|`===`, `!==`
+|`IS NOT DISTINCT FROM`, `IS DISTINCT FROM`
+
+|
+|`&&`
+|`AND`
+
+|Lowest
+|`\|\|`
+|`OR`
+|===
+
+== Other expressions
+
+[source,immigrant]
+----
+table Example {
+    a: sql"INTEGER"
+        @check(_ > 0)                     /// placeholder for current value
+        @check(_ != null)                  /// null literal
+        @check(_ == true)                  /// boolean literal
+        @check(_ != 'forbidden')           /// string literal
+        @check(_ != 42)                    /// numeric literal
+        @check(char_length(_) > 0)         /// function call
+        @check(_ :: sql"BIGINT" > 0)       /// cast
+        @check(if _ > 10 then true else false) /// conditional (CASE WHEN ... THEN ... ELSE ... END)
+    ;
+};
+
+struct example {
+    a: sql"INTEGER";
+    @check(_.a > 0);                       /// field access on composites
+};
+----

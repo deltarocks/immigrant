@@ -1,0 +1,92 @@
+
+= Tables
+
+[source,immigrant]
+----
+table User "users" {
+    user_id @primary_key;
+    name: sql"TEXT";
+    created_at;
+};
+----
+
+Inside a table block, you declare:
+
+1. Columns (with optional type, nullability, attributes, foreign keys)
+2. Table-level attributes (`@primary_key`, `@unique`, `@check`, `@index`)
+3. Standalone foreign keys
+4. Mixin inclusions
+
+== Columns
+
+Basic column syntax:
+
+[source,immigrant]
+----
+table Example {
+    column_name: type;
+};
+----
+
+Type can be omitted. Immigrant resolves it from a scalar/enum/struct with the same name as the column:
+
+[source,immigrant]
+----
+scalar user_id = sql"INTEGER";
+table User {
+    user_id;          /// type is 'user_id' (resolved by name)
+    name: sql"TEXT";  /// explicit inline type
+    bio: sql"TEXT"?;  /// nullable, inline type
+    role: user_role;  /// explicit type reference
+};
+----
+
+=== Nullability
+
+Append `?` to make a column nullable. Without it, columns are `NOT NULL`:
+
+[source,immigrant]
+----
+table Example {
+    name: sql"TEXT";   /// NOT NULL
+    bio: sql"TEXT"?;   /// nullable
+    picture?;          /// nullable, type resolved by name
+};
+----
+
+=== Inline SQL types
+
+Instead of referencing a scalar, you can write the SQL type directly:
+
+[source,immigrant]
+----
+table Example {
+    field: sql"TEXT";
+    field: sql"INTEGER[]";
+    field: sql"{some_scalar}[]";  /// reference another type inside inline SQL
+};
+----
+
+== Mixins
+
+Mixins are reusable groups of columns, attributes, and foreign keys that can be included in multiple tables:
+
+[source,immigrant]
+----
+@mixin Timestamps {
+    created_at;
+    updated_at;
+};
+
+table User {
+    @mixin Timestamps;
+    user_id @primary_key;
+};
+
+table Post {
+    @mixin Timestamps;
+    id: sql"INTEGER" @primary_key;
+};
+----
+
+Mixins can include other mixins.

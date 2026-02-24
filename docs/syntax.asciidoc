@@ -1,120 +1,211 @@
 
-= Immigrant
-:toc: right
+= Immigrant Schema Language
+:toc: left
+:toclevels: 3
+:source-highlighter: rouge
 
-== Introduction
+== Quick Start
 
-This document provides a brief overview of the syntax of the schema language.
+Immigrant schema describes your database in a single file.
+Instead of writing raw DDL, you declare types, tables, and constraints. Immigrant figures out what SQL to generate, and what migrations to run when you change things.
 
-== Schema Structure
+Here is a minimal schema:
 
-A schema is composed of various items, including tables, enums, and scalars.
-
-=== Table
-
-A table is defined using the `table` keyword. It must include a name and may also include columns, annotations, and foreign keys.
-
-[source,plaintext]
+[source,immigrant]
 ----
-table TableName {
-    column1: type;
-    column2: type;
-    @annotation;
-    foreignKey;
-}
-----
+scalar user_id = sql"INTEGER";
 
-=== Enum
+enum role {
+    admin;
+    member;
+};
 
-An enum is defined using the `enum` keyword. It must include a name and a list of items.
-
-[source,plaintext]
-----
-enum EnumName {item1; item2;}
+table User {
+    user_id @primary_key;
+    role;
+    name: sql"TEXT";
+};
 ----
 
-== Scalars
+This produces a PostgreSQL domain `user_id`, an enum type `role`, and a table with three columns.
+Notice that `user_id` and `role` columns don't need explicit types -- immigrant resolves them by name.
 
-A scalar represents a primitive type in the database. It is defined with a keyword `scalar`, followed by an identifier and the corresponding database type in quotes. Additionally, scalars can have annotations `@default` and `@check`.
+== Core Concepts
 
-[source,plaintext]
+=== Naming
+
+Every item has a *code name* (used in schema references) and an optional *database name* (actual SQL identifier).
+
+[source,immigrant]
 ----
-// A scalar named "my_integer" that corresponds to the "int" type in the database.
-// It has a default value of 0.
-scalar my_integer "int" @default(0);
-
-// A scalar named "positive_integer" that corresponds to the "int" type in the database.
-// It has a check constraint that ensures the value is positive.
-scalar positive_integer "int" @check(_ > 0);
-
-// A scalar named "limited_string" that corresponds to the "varchar(255)" type in the database.
-// It has a default value of an empty string.
-scalar limited_string "varchar(255)" @default("");
-
-// A scalar named "future_date" that corresponds to the "date" type in the database.
-// It has a check constraint that ensures the date is in the future.
-scalar future_date "date" @check(_ > now());
+table UserProfile "user_profiles" { ... };
+scalar user_id "uid" = sql"INTEGER";
+enum status "account_status" { active; inactive; };
 ----
+
+If database name is omitted, naming convention preprocessor transforms code names automatically (e.g. PostgreSQL convention turns `UserProfile` into `user_profiles`).
+
+Renaming the database name in schema triggers `ALTER ... RENAME` in migration. Immigrant tracks identity by code name.
+
+=== Comments
+
+[source,immigrant]
+----
+// Doc comment, translated to COMMENT ON in PostgreSQL
+/// Ignored by parser, for schema authors only
+----
+
+`//` comments before items become `COMMENT ON` statements in SQL.
+`///` comments produce no SQL output.
+
+== Items
+
+=== Scalars
+
+Scalars define reusable column types. Non-inlined scalars become PostgreSQL ``DOMAIN``s with constraints baked in:
+
+[source,immigrant]
+----
+scalar user_id = sql"INTEGER";
+scalar positive_int = sql"INTEGER" @check(_ > 0);
+scalar created_at = sql"TIMESTAMPTZ" @default(NOW());
+----
+
+Attributes on scalars propagate to every column that uses them.
+If every `user_id` column should be indexed, declare it on the scalar:
+
+[source,immigrant]
+----
+scalar user_id = sql"INTEGER" @index;
+----
+
+Now every column of type `user_id` gets an index automatically.
+
+See also: `@inline` and `@external` in link:attributes.asciidoc[Attributes].
+
+=== Enums
+
+Enums map to PostgreSQL enum types.
+
+[source,immigrant]
+----
+enum user_group {
+    admin;
+    member;
+    guest;
+};
+----
+
+Variants can have custom SQL values (useful for renaming without migration pain):
+
+[source,immigrant]
+----
+enum user_group {
+    // Stored as 'superuser' in database, referenced as 'admin' in schema
+    admin "superuser";
+    member;
+};
+----
+
+Adding a variant appends it with `ALTER TYPE ... ADD VALUE`.
+Removing a variant recreates the type (PostgreSQL limitation).
+
+=== Structs
+
+Structs become PostgreSQL composite types. When used as a column type, immigrant automatically generates nullability checks for their fields.
+
+[source,immigrant]
+----
+struct address {
+    street: sql"TEXT";
+    city: sql"TEXT";
+    zip: sql"TEXT" @check(char_length(_) == 5);
+};
+
+table Customer {
+    id: sql"INTEGER" @primary_key;
+    address;  /// column type is 'address' composite
+};
+----
+
+Struct-level checks can reference fields via `_.fieldname`:
+
+[source,immigrant]
+----
+struct range {
+    lo: sql"INTEGER";
+    hi: sql"INTEGER";
+    @check "lo_le_hi" (_.lo <= _.hi);
+};
+----
+
+include::tables.asciidoc[leveloffset=+2]
+
+include::views.asciidoc[leveloffset=+2]
 
 == Annotations
 
-Annotations are used to modify the behavior of columns, scalars, or tables. They are prefixed with the `@` symbol.
+Generic annotations (`#...`) attach metadata for code generators. They do not affect SQL output, but are preserved for tools like diesel code generation:
 
-[source,plaintext]
+[source,immigrant]
 ----
-@ColumnName @annotation;
-----
+#diesel(type="dt::Text",copy,custom)
+scalar user_id = sql"TEXT";
 
-== SQL Expressions
-
-SQL expressions can be used in default values and check constraints.
-
-[source,plaintext]
-----
-@default(sql_expression);
+#diesel(derive = "async_graphql::Enum")
+enum client_kind { ... };
 ----
 
-== Foreign Keys
+Annotations can be placed before any item (scalar, enum, struct, table) or before individual columns and enum variants.
 
-Foreign keys are used to establish a link between the data in two tables. They are a key field or set of fields in one table, that is used to link to a primary key in another table. 
+include::attributes.asciidoc[leveloffset=+1]
 
-[source,plaintext]
+include::foreign-keys.asciidoc[leveloffset=+1]
+
+include::expressions.asciidoc[leveloffset=+1]
+
+== Full Example
+
+[source,immigrant]
 ----
-columnName: type ~ TargetTable(targetColumn);
+/// Scalars define reusable types with baked-in constraints
+scalar user_id = sql"TEXT" @check(LEFT(_, 1) == 'U' && char_length(_) == 33);
+scalar created_at = sql"TIMESTAMPTZ" @default(NOW());
+scalar name = sql"TEXT";
+scalar bool = sql"BOOLEAN" @inline;
+
+enum challenge_kind {
+    password;
+    gpg;
+    totp;
+};
+
+table User {
+    user_id @primary_key;
+    created_at;
+};
+
+table Profile {
+    // Profile data for a user
+    user_id @primary_key ~.cascade User;
+    name?;
+    picture: sql"TEXT"?;
+    updated_at: sql"TIMESTAMPTZ" @default(NOW());
+};
+
+table UserChallenge {
+    user_id ~.cascade User;
+    challenge_kind;
+    check_data: sql"BYTEA";
+    search_key: sql"BYTEA"?;
+
+    @primary_key(user_id, challenge_kind, check_data);
+    @unique(challenge_kind, search_key);
+};
+
+view ActiveUsers = sql"""
+    SELECT * FROM {User}
+    JOIN {Profile} ON {Profile.user_id} = {User.user_id}
+    WHERE {Profile.name} IS NOT NULL
+""";
 ----
-
-In the above example, `columnName` in the current table is a foreign key that references `targetColumn` in `TargetTable`. If `targetColumn` is omitted, it is assumed that the target column has the same name as the source column (`columnName` in this case).
-
-[source,plaintext]
-----
-example_column: type ~ Table; // Target column is implied to be the same name: example_column
-----
-
-Foreign keys can also be defined in a standalone manner, with a full declaration syntax. The declaration includes the source columns in the current table, an optional foreign key name, the target table, and the target columns. 
-
-[source,plaintext]
-----
-(sourceColumn1, sourceColumn2) "foreignKeyName" ~.onDeleteAction TargetTable(targetColumn1, targetColumn2);
-----
-
-In the above example, `sourceColumn1` and `sourceColumn2` in the current table are foreign keys that reference `targetColumn1` and `targetColumn2` in `TargetTable`, respectively. The foreign key is named `foreignKeyName`, and the `onDeleteAction` specifies what action to take when the referenced data in the target table is deleted.
-
-The `onDeleteAction` can be one of the following:
-
-- `.cascade`: Delete or update the row from the parent table and automatically delete or update the matching rows in the child table.
-- `.set_null`: Delete or update the row from the parent table and set the foreign key column or columns in the child table to `NULL`.
-- `.set_default`: Delete or update the row from the parent table and set the foreign key column or columns in the child table to their default values.
-- `.restrict`: Rejects the delete or update operation for the parent table.
-- `.noop`: Do nothing.
-
-[source,plaintext]
-----
-table B{
-    a: type; 
-    b: type;
-    // Standalone fks, full declaration syntax
-    (a, b) "fk_name" ~.cascade Table (a, b);
-}
-----
-
-Note: In the standalone syntax, either source or target columns may be omitted, but not both. If the foreign key name is omitted, it will be generated by the database conventions.
