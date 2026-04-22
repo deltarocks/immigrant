@@ -5,10 +5,10 @@ use itertools::{Either, Itertools};
 use super::sql::Sql;
 use crate::{
 	HasIdent, SchemaEnum, SchemaScalar,
-	attribute::AttributeList,
+	annotation::AnnotationList,
 	changelist::IsCompatible,
-	column::ColumnAnnotation,
-	composite::FieldAnnotation,
+	column::ColumnAttribute,
+	composite::FieldAttribute,
 	def_name_impls, derive_is_isomorph_by_id_name,
 	diagnostics::Report,
 	index::{Check, Index, PrimaryKey, UniqueConstraint},
@@ -72,13 +72,13 @@ pub struct Enum {
 	uid: OwnUid,
 	name: TypeDefName,
 	pub docs: Vec<String>,
-	pub attrlist: AttributeList,
+	pub annotations: AnnotationList,
 	pub items: Vec<EnumItem>,
 }
 impl Enum {
 	pub fn new(
 		docs: Vec<String>,
-		attrlist: AttributeList,
+		annotations: AnnotationList,
 		name: TypeDefName,
 		items: Vec<EnumItem>,
 	) -> Self {
@@ -86,7 +86,7 @@ impl Enum {
 			uid: next_uid(),
 			name,
 			docs,
-			attrlist,
+			annotations,
 			items,
 		}
 	}
@@ -109,17 +109,17 @@ impl SchemaEnum<'_> {
 
 #[derive(Debug, Default)]
 pub(crate) struct PropagatedScalarData {
-	pub annotations: Vec<ColumnAnnotation>,
-	pub field_annotations: Vec<FieldAnnotation>,
+	pub attributes: Vec<ColumnAttribute>,
+	pub field_attributes: Vec<FieldAttribute>,
 }
 impl PropagatedScalarData {
 	/// Returns true if extended
 	pub(crate) fn extend(&mut self, other: Self) {
-		self.annotations.extend(other.annotations);
-		self.field_annotations.extend(other.field_annotations);
+		self.attributes.extend(other.attributes);
+		self.field_attributes.extend(other.field_attributes);
 	}
 	pub(crate) fn is_empty(&self) -> bool {
-		self.annotations.is_empty() && self.field_annotations.is_empty()
+		self.attributes.is_empty() && self.field_attributes.is_empty()
 	}
 }
 
@@ -160,57 +160,57 @@ pub struct Scalar {
 	uid: OwnUid,
 	name: TypeDefName,
 	pub docs: Vec<String>,
-	pub attrlist: AttributeList,
+	pub annotations: AnnotationList,
 	native: InlineSqlType,
-	pub annotations: Vec<ScalarAnnotation>,
+	pub attributes: Vec<ScalarAttribute>,
 	inlined: bool,
 }
 def_name_impls!(Scalar, TypeKind);
 impl Scalar {
 	pub fn new(
 		docs: Vec<String>,
-		attrlist: AttributeList,
+		annotations: AnnotationList,
 		name: TypeDefName,
 		native: InlineSqlType,
-		annotations: Vec<ScalarAnnotation>,
+		attributes: Vec<ScalarAttribute>,
 	) -> Self {
 		Self {
 			uid: next_uid(),
 			name,
 			docs,
-			attrlist,
-			native,
 			annotations,
+			native,
+			attributes,
 			inlined: false,
 		}
 	}
 	pub(crate) fn propagate(&mut self, inline: bool) -> PropagatedScalarData {
-		let annotations = mem::take(&mut self.annotations);
-		let field_annotations = annotations
+		let attributes = mem::take(&mut self.attributes);
+		let field_attributes = attributes
 			.iter()
 			.flat_map(|a| a.propagate_to_field(inline))
 			.collect_vec();
-		let (annotations, retained) = annotations
+		let (attributes, retained) = attributes
 			.into_iter()
 			.partition_map(|a| a.propagate_to_column(inline));
-		self.annotations = retained;
+		self.attributes = retained;
 		if inline {
 			self.inlined = true;
 		}
 		PropagatedScalarData {
-			annotations,
-			field_annotations,
+			attributes,
+			field_attributes,
 		}
 	}
 	pub fn is_always_inline(&self) -> bool {
-		self.annotations
+		self.attributes
 			.iter()
-			.any(|a| matches!(a, ScalarAnnotation::Inline))
+			.any(|a| matches!(a, ScalarAttribute::Inline))
 	}
 	pub fn is_external(&self) -> bool {
-		self.annotations
+		self.attributes
 			.iter()
-			.any(|a| matches!(a, ScalarAnnotation::External))
+			.any(|a| matches!(a, ScalarAttribute::External))
 	}
 	pub fn inlined(&self) -> bool {
 		self.inlined
@@ -247,9 +247,9 @@ impl SchemaScalar<'_> {
 		if self.inlined {
 			assert!(
 				!self
-					.annotations
+					.attributes
 					.iter()
-					.any(ScalarAnnotation::is_inline_target),
+					.any(ScalarAttribute::is_inline_target),
 				"inlined scalars may not have inline target scalars"
 			);
 			self.native.expand(rn, self.schema, report)
@@ -260,7 +260,7 @@ impl SchemaScalar<'_> {
 }
 
 #[derive(Debug)]
-pub enum ScalarAnnotation {
+pub enum ScalarAttribute {
 	/// Moved to column if inlined.
 	Default(Sql),
 	/// Moved to column if inlined.
@@ -275,30 +275,30 @@ pub enum ScalarAnnotation {
 	Inline,
 	External,
 }
-impl ScalarAnnotation {
+impl ScalarAttribute {
 	pub fn as_check(&self) -> Option<&Check> {
 		match self {
 			Self::Check(c) => Some(c),
 			_ => None,
 		}
 	}
-	/// Should annotation be removed after inlining?
+	/// Should attribute be removed after inlining?
 	fn is_inline_target(&self) -> bool {
 		!matches!(self, Self::Inline | Self::External)
 	}
-	fn propagate_to_field(&self, inline: bool) -> Option<FieldAnnotation> {
+	fn propagate_to_field(&self, inline: bool) -> Option<FieldAttribute> {
 		Some(match self {
-			ScalarAnnotation::Check(c) if inline => FieldAnnotation::Check(c.clone_for_propagate()),
+			ScalarAttribute::Check(c) if inline => FieldAttribute::Check(c.clone_for_propagate()),
 			_ => return None,
 		})
 	}
-	fn propagate_to_column(self, inline: bool) -> Either<ColumnAnnotation, Self> {
+	fn propagate_to_column(self, inline: bool) -> Either<ColumnAttribute, Self> {
 		Either::Left(match self {
-			ScalarAnnotation::PrimaryKey(p) => ColumnAnnotation::PrimaryKey(p),
-			ScalarAnnotation::Unique(u) => ColumnAnnotation::Unique(u),
-			ScalarAnnotation::Index(i) => ColumnAnnotation::Index(i),
-			ScalarAnnotation::Default(d) if inline => ColumnAnnotation::Default(d),
-			ScalarAnnotation::Check(c) if inline => ColumnAnnotation::Check(c),
+			ScalarAttribute::PrimaryKey(p) => ColumnAttribute::PrimaryKey(p),
+			ScalarAttribute::Unique(u) => ColumnAttribute::Unique(u),
+			ScalarAttribute::Index(i) => ColumnAttribute::Index(i),
+			ScalarAttribute::Default(d) if inline => ColumnAttribute::Default(d),
+			ScalarAttribute::Check(c) if inline => ColumnAttribute::Check(c),
 			_ => return Either::Right(self),
 		})
 	}

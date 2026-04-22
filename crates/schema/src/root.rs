@@ -109,7 +109,7 @@ impl Item {
 pub struct SchemaProcessOptions {
 	/// If not - then every scalar is transformed to a regular type by inlining.
 	pub generator_supports_domain: bool,
-	/// How to create item names, how annotation deduplication should be handled, etc.
+	/// How to create item names, how attribute deduplication should be handled, etc.
 	pub naming_convention: NamingConvention,
 }
 
@@ -180,7 +180,7 @@ impl Schema {
 			propagated_scalars.insert_unique(s.id(), data);
 		}
 
-		// Propagate scalar annotations to fields
+		// Propagate scalar attributes to fields
 		for composite in self.0.iter_mut().filter_map(Item::as_composite_mut) {
 			for (id, data) in &propagated_scalars {
 				composite.propagate_scalar_data(*id, data);
@@ -188,7 +188,7 @@ impl Schema {
 			composite.process();
 		}
 
-		// Propagate composite annotations to other composites
+		// Propagate composite attributes to other composites
 		loop {
 			let mut extended_this_step = <HashMap<TypeIdent, PropagatedScalarData>>::new();
 			for s in self.0.iter_mut().filter_map(Item::as_composite_mut) {
@@ -216,7 +216,7 @@ impl Schema {
 			}
 		}
 
-		// Propagate scalar annotations to columns
+		// Propagate scalar attributes to columns
 		for table in self.0.iter_mut().filter_map(Item::as_table_mut) {
 			for (id, data) in &propagated_scalars {
 				table.propagate_scalar_data(*id, data);

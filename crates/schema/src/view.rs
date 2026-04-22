@@ -1,5 +1,5 @@
 use crate::{
-	attribute::AttributeList,
+	annotation::AnnotationList,
 	def_name_impls,
 	names::{ColumnIdent, TableIdent, ViewDefName, ViewKind},
 	uid::{OwnUid, next_uid},
@@ -19,7 +19,7 @@ pub struct View {
 	uid: OwnUid,
 	name: ViewDefName,
 	pub docs: Vec<String>,
-	pub attrlist: AttributeList,
+	pub annotations: AnnotationList,
 	pub materialized: bool,
 	pub definition: Definition,
 }
@@ -27,7 +27,7 @@ def_name_impls!(View, ViewKind);
 impl View {
 	pub fn new(
 		docs: Vec<String>,
-		attrlist: AttributeList,
+		annotations: AnnotationList,
 		name: ViewDefName,
 		materialized: bool,
 		definition: Definition,
@@ -36,7 +36,7 @@ impl View {
 			uid: next_uid(),
 			name,
 			docs,
-			attrlist,
+			annotations,
 			materialized,
 			definition,
 		}

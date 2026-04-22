@@ -15,11 +15,11 @@ pub enum Severity {
 pub struct ReportPart {
 	pub msg: String,
 	pub severity: Severity,
-	pub annotations: Vec<Annotation>,
+	pub annotations: Vec<Label>,
 }
 
 #[derive(Clone)]
-pub struct Annotation {
+pub struct Label {
 	pub span: SimpleSpan,
 	pub msg: String,
 }
@@ -105,7 +105,7 @@ pub struct PartBuilder<'r> {
 }
 impl PartBuilder<'_> {
 	pub fn annotate(&mut self, msg: impl AsRef<str>, span: SimpleSpan) -> &mut Self {
-		self.part.annotations.push(Annotation {
+		self.part.annotations.push(Label {
 			span,
 			msg: msg.as_ref().to_owned(),
 		});

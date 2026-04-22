@@ -4,7 +4,7 @@ use derivative::Derivative;
 use ids::DbIdent;
 
 use self::{
-	attribute::AttributeList,
+	annotation::AnnotationList,
 	column::Column,
 	composite::Composite,
 	diagnostics::Report,
@@ -12,9 +12,9 @@ use self::{
 	index::{Check, Index, PrimaryKey, UniqueConstraint},
 	names::{ItemKind, TypeIdent},
 	root::Schema,
-	scalar::{Enum, Scalar, ScalarAnnotation},
+	scalar::{Enum, Scalar, ScalarAttribute},
 	sql::Sql,
-	table::{ForeignKey, Table, TableAnnotation},
+	table::{ForeignKey, Table, TableAttribute},
 	uid::RenameMap,
 	view::View,
 };
@@ -36,7 +36,7 @@ pub mod names;
 
 pub mod parser;
 
-pub mod attribute;
+pub mod annotation;
 
 mod changelist;
 pub mod renamelist;
@@ -384,18 +384,18 @@ impl<'a> SchemaType<'a> {
 	pub fn has_default(&self) -> bool {
 		match self {
 			SchemaType::Scalar(s) => s
-				.annotations
+				.attributes
 				.iter()
-				.any(|a| matches!(a, ScalarAnnotation::Default(_))),
+				.any(|a| matches!(a, ScalarAttribute::Default(_))),
 			SchemaType::Enum(_) => false,
 			SchemaType::Composite(_) => false,
 		}
 	}
-	pub fn attrlist(&self) -> &AttributeList {
+	pub fn annotations(&self) -> &AnnotationList {
 		match self {
-			SchemaType::Scalar(s) => &s.attrlist,
-			SchemaType::Enum(e) => &e.attrlist,
-			SchemaType::Composite(c) => &c.attrlist,
+			SchemaType::Scalar(s) => &s.annotations,
+			SchemaType::Enum(e) => &e.annotations,
+			SchemaType::Composite(c) => &c.annotations,
 		}
 	}
 	pub fn depend_on(&self, out: &mut Vec<TypeIdent>) {
@@ -457,18 +457,18 @@ impl SchemaTable<'_> {
 		})
 	}
 	pub fn checks(&'_ self) -> impl Iterator<Item = TableCheck<'_>> {
-		self.annotations
+		self.attributes
 			.iter()
-			.filter_map(TableAnnotation::as_check)
+			.filter_map(TableAttribute::as_check)
 			.map(|value| TableCheck {
 				table: *self,
 				value,
 			})
 	}
 	pub fn unique_constraints(&'_ self) -> impl Iterator<Item = TableUniqueConstraint<'_>> {
-		self.annotations
+		self.attributes
 			.iter()
-			.filter_map(TableAnnotation::as_unique_constraint)
+			.filter_map(TableAttribute::as_unique_constraint)
 			.map(|value| TableUniqueConstraint {
 				table: *self,
 				value,

@@ -1,8 +1,8 @@
 use schema::{
-	column::ColumnAnnotation,
+	column::ColumnAttribute,
 	root::Schema,
-	scalar::ScalarAnnotation,
-	table::TableAnnotation,
+	scalar::ScalarAttribute,
+	table::TableAttribute,
 	uid::{RenameExt, RenameMap},
 };
 
@@ -26,23 +26,23 @@ pub fn validate(_code: &str, schema: &Schema, rn: &RenameMap) {
 			schema::SchemaItem::Table(t) => {
 				for ele in t.columns() {
 					validate_db(&ele, rn);
-					for ele in &ele.annotations {
+					for ele in &ele.attributes {
 						match ele {
-							ColumnAnnotation::Check(_)
-							| ColumnAnnotation::Unique(_)
-							| ColumnAnnotation::PrimaryKey(_)
-							| ColumnAnnotation::Index(_) => panic!("should be propagated"),
-							ColumnAnnotation::Default(_) | ColumnAnnotation::InitializeAs(_) => {}
+							ColumnAttribute::Check(_)
+							| ColumnAttribute::Unique(_)
+							| ColumnAttribute::PrimaryKey(_)
+							| ColumnAttribute::Index(_) => panic!("should be propagated"),
+							ColumnAttribute::Default(_) | ColumnAttribute::InitializeAs(_) => {}
 						}
 					}
 				}
-				for ele in &t.annotations {
+				for ele in &t.attributes {
 					match ele {
-						TableAnnotation::Check(c) => validate_db(c, rn),
-						TableAnnotation::Unique(u) => validate_db(u, rn),
-						TableAnnotation::PrimaryKey(p) => validate_db(p, rn),
-						TableAnnotation::Index(i) => validate_db(i, rn),
-						TableAnnotation::External => {}
+						TableAttribute::Check(c) => validate_db(c, rn),
+						TableAttribute::Unique(u) => validate_db(u, rn),
+						TableAttribute::PrimaryKey(p) => validate_db(p, rn),
+						TableAttribute::Index(i) => validate_db(i, rn),
+						TableAttribute::External => {}
 					}
 				}
 			}
@@ -52,15 +52,15 @@ pub fn validate(_code: &str, schema: &Schema, rn: &RenameMap) {
 				}
 			}
 			schema::SchemaItem::Scalar(s) => {
-				for ele in &s.annotations {
+				for ele in &s.attributes {
 					match ele {
-						ScalarAnnotation::Check(c) => validate_db(c, rn),
-						ScalarAnnotation::PrimaryKey(_)
-						| ScalarAnnotation::Unique(_)
-						| ScalarAnnotation::Index(_) => panic!("should be propagated"),
-						ScalarAnnotation::Default(_)
-						| ScalarAnnotation::Inline
-						| ScalarAnnotation::External => {}
+						ScalarAttribute::Check(c) => validate_db(c, rn),
+						ScalarAttribute::PrimaryKey(_)
+						| ScalarAttribute::Unique(_)
+						| ScalarAttribute::Index(_) => panic!("should be propagated"),
+						ScalarAttribute::Default(_)
+						| ScalarAttribute::Inline
+						| ScalarAttribute::External => {}
 					}
 				}
 			}

@@ -5,11 +5,11 @@ use itertools::{Either, Itertools};
 use super::{
 	index::Index,
 	sql::Sql,
-	table::{ForeignKey, TableAnnotation},
+	table::{ForeignKey, TableAttribute},
 };
 use crate::{
 	HasIdent, SchemaType, TableColumn,
-	attribute::AttributeList,
+	annotation::AnnotationList,
 	changelist::IsCompatible,
 	def_name_impls, derive_is_isomorph_by_id_name,
 	diagnostics::Report,
@@ -20,7 +20,7 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub enum ColumnAnnotation {
+pub enum ColumnAttribute {
 	/// Moved to table.
 	Check(Check),
 	/// Moved to table.
@@ -29,7 +29,7 @@ pub enum ColumnAnnotation {
 	PrimaryKey(PrimaryKey),
 	/// Moved to table.
 	Index(Index),
-	/// Column default annotation.
+	/// Column default attribute.
 	Default(Sql),
 	/// If column is created, then this attribute is used to prefill it, treat it as one-time, much more powerful
 	/// DEFAULT value.
@@ -45,7 +45,7 @@ pub enum ColumnAnnotation {
 	/// thus not breaking isolation of a standalone schema definition.
 	InitializeAs(Sql),
 }
-impl ColumnAnnotation {
+impl ColumnAttribute {
 	fn as_default(&self) -> Option<&Sql> {
 		match self {
 			Self::Default(s) => Some(s),
@@ -58,14 +58,14 @@ impl ColumnAnnotation {
 			_ => None,
 		}
 	}
-	fn propagate_to_table(self, column: ColumnIdent) -> Either<TableAnnotation, Self> {
+	fn propagate_to_table(self, column: ColumnIdent) -> Either<TableAttribute, Self> {
 		Either::Left(match self {
-			ColumnAnnotation::Check(c) => TableAnnotation::Check(c.propagate_to_table(column)),
-			ColumnAnnotation::Unique(u) => TableAnnotation::Unique(u.propagate_to_table(column)),
-			ColumnAnnotation::PrimaryKey(p) => {
-				TableAnnotation::PrimaryKey(p.propagate_to_table(column))
+			ColumnAttribute::Check(c) => TableAttribute::Check(c.propagate_to_table(column)),
+			ColumnAttribute::Unique(u) => TableAttribute::Unique(u.propagate_to_table(column)),
+			ColumnAttribute::PrimaryKey(p) => {
+				TableAttribute::PrimaryKey(p.propagate_to_table(column))
 			}
-			ColumnAnnotation::Index(i) => TableAnnotation::Index(i.propagate_to_table(column)),
+			ColumnAttribute::Index(i) => TableAttribute::Index(i.propagate_to_table(column)),
 			_ => return Either::Right(self),
 		})
 	}
@@ -74,12 +74,12 @@ impl ColumnAnnotation {
 	}
 	fn clone_for_propagate(&self) -> Self {
 		match self {
-			ColumnAnnotation::Check(c) => Self::Check(c.clone_for_propagate()),
-			ColumnAnnotation::Unique(u) => Self::Unique(u.clone_for_propagate()),
-			ColumnAnnotation::PrimaryKey(p) => Self::PrimaryKey(p.clone_for_propagate()),
-			ColumnAnnotation::Index(i) => Self::Index(i.clone_for_propagate()),
-			ColumnAnnotation::Default(d) => Self::Default(d.clone()),
-			ColumnAnnotation::InitializeAs(i) => Self::InitializeAs(i.clone()),
+			ColumnAttribute::Check(c) => Self::Check(c.clone_for_propagate()),
+			ColumnAttribute::Unique(u) => Self::Unique(u.clone_for_propagate()),
+			ColumnAttribute::PrimaryKey(p) => Self::PrimaryKey(p.clone_for_propagate()),
+			ColumnAttribute::Index(i) => Self::Index(i.clone_for_propagate()),
+			ColumnAttribute::Default(d) => Self::Default(d.clone()),
+			ColumnAttribute::InitializeAs(i) => Self::InitializeAs(i.clone()),
 		}
 	}
 }
@@ -89,10 +89,10 @@ pub struct Column {
 	uid: OwnUid,
 	name: ColumnDefName,
 	pub docs: Vec<String>,
-	pub attrs: AttributeList,
+	pub annotations: AnnotationList,
 	pub nullable: bool,
 	pub ty: TypeIdent,
-	pub annotations: Vec<ColumnAnnotation>,
+	pub attributes: Vec<ColumnAttribute>,
 	pub foreign_key: Option<PartialForeignKey>,
 }
 def_name_impls!(Column, ColumnKind);
@@ -101,20 +101,20 @@ impl Column {
 	pub fn new(
 		name: ColumnDefName,
 		docs: Vec<String>,
-		attrs: AttributeList,
+		annotations: AnnotationList,
 		nullable: bool,
 		ty: TypeIdent,
-		annotations: Vec<ColumnAnnotation>,
+		attributes: Vec<ColumnAttribute>,
 		foreign_key: Option<PartialForeignKey>,
 	) -> Self {
 		Self {
 			uid: next_uid(),
-			attrs,
+			annotations,
 			name,
 			docs,
 			nullable,
 			ty,
-			annotations,
+			attributes,
 			foreign_key,
 		}
 	}
@@ -144,20 +144,20 @@ impl Column {
 		propagated: &PropagatedScalarData,
 	) {
 		if self.ty == scalar {
-			self.annotations.extend(
+			self.attributes.extend(
 				propagated
-					.annotations
+					.attributes
 					.iter()
 					.map(|v| v.clone_for_propagate()),
 			);
 		}
 	}
-	pub fn propagate_annotations(&mut self) -> Vec<TableAnnotation> {
-		let (annotations, retained) = mem::take(&mut self.annotations)
+	pub fn propagate_attributes(&mut self) -> Vec<TableAttribute> {
+		let (attributes, retained) = mem::take(&mut self.attributes)
 			.into_iter()
 			.partition_map(|a| a.propagate_to_table(self.id()));
-		self.annotations = retained;
-		annotations
+		self.attributes = retained;
+		attributes
 	}
 	pub fn propagate_foreign_key(&mut self) -> Option<ForeignKey> {
 		let mut fk = self.foreign_key.take()?;
@@ -173,10 +173,10 @@ impl Column {
 				self.name.db.clone(),
 			),
 			self.docs.clone(),
-			self.attrs.clone(),
+			self.annotations.clone(),
 			self.nullable,
 			self.ty,
-			self.annotations
+			self.attributes
 				.iter()
 				.map(|a| a.clone_for_mixin())
 				.collect(),
@@ -196,14 +196,14 @@ impl<'a> TableColumn<'a> {
 	/// it needs to be handled manually.
 	/// If you only want to check if default exists - use has_default.
 	pub fn default(&self) -> Option<&Sql> {
-		self.annotations
+		self.attributes
 			.iter()
 			.filter_map(|v| v.as_default())
 			.at_most_one()
 			.unwrap()
 	}
 	pub fn initialize_as(&self) -> Option<&Sql> {
-		self.annotations
+		self.attributes
 			.iter()
 			.filter_map(|v| v.as_initialize_as())
 			.at_most_one()

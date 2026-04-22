@@ -6,7 +6,7 @@ scalar u31 = sql"INTEGER" @check "u31_is_unsigned" (_ >= 0);
 /// as immigrant schemas in the wild are much more constrained than the normal SQL databases.
 scalar non_zero_int = sql"INTEGER" @check "non_zero_int_cant_be_zero" (_ != 0) @inline;
 
-/// You can also specify some of the column annotations on scalars.
+/// You can also specify some of the column attributes on scalars.
 /// I.e if you want all of your data to be serchable by user, you can specify index on the user id type itself.
 scalar user_id = sql"INTEGER" @index;
 

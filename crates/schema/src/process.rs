@@ -15,9 +15,9 @@ use crate::{
 	ids::{DbIdent, Ident},
 	index::{Check, Index, PrimaryKey, UniqueConstraint},
 	root::{Item, Schema},
-	scalar::{Enum, Scalar, ScalarAnnotation},
+	scalar::{Enum, Scalar, ScalarAttribute},
 	sql::Sql,
-	table::{Table, TableAnnotation},
+	table::{Table, TableAttribute},
 	uid::{RenameExt, RenameMap},
 	view::View,
 	w,
@@ -109,8 +109,8 @@ impl Pgnc<&mut Scalar> {
 	/// `table_check`
 	pub fn generate_names(&mut self, rn: &mut RenameMap) {
 		let name = self.db(rn);
-		for ann in &mut self.annotations {
-			if let ScalarAnnotation::Check(c) = ann {
+		for ann in &mut self.attributes {
+			if let ScalarAttribute::Check(c) = ann {
 				if c.db_assigned(rn) {
 					continue;
 				}
@@ -120,10 +120,10 @@ impl Pgnc<&mut Scalar> {
 	}
 	/// All checks with the same name are merged using AND
 	pub fn merge_checks(&mut self, rn: &RenameMap) {
-		let (checks, mut annotations): (Vec<_>, Vec<_>) = mem::take(&mut self.annotations)
+		let (checks, mut attributes): (Vec<_>, Vec<_>) = mem::take(&mut self.attributes)
 			.into_iter()
 			.partition_map(|a| match a {
-				ScalarAnnotation::Check(c) => Either::Left(c),
+				ScalarAttribute::Check(c) => Either::Left(c),
 				a => Either::Right(a),
 			});
 		let merged_checks = checks
@@ -133,12 +133,12 @@ impl Pgnc<&mut Scalar> {
 			.into_iter()
 			.collect::<BTreeMap<_, _>>();
 		for (name, checks) in merged_checks {
-			annotations.push(ScalarAnnotation::Check(Check::new(
+			attributes.push(ScalarAttribute::Check(Check::new(
 				Some(name),
 				Sql::all(checks),
 			)))
 		}
-		self.annotations = annotations;
+		self.attributes = attributes;
 	}
 }
 
@@ -180,7 +180,7 @@ impl Pgnc<&mut Table> {
 			return;
 		}
 		let id = self.id().name();
-		let id = if self.attrlist.get_single("pgnc", "as_is") == Ok(true) {
+		let id = if self.annotations.get_single("pgnc", "as_is") == Ok(true) {
 			id
 		} else {
 			let id = to_snake_case(&id);
@@ -196,37 +196,37 @@ impl Pgnc<&mut Table> {
 			column.set_db(rn, DbIdent::new(&column.id().name()))
 		}
 	}
-	/// Merge annotations:
+	/// Merge attributes:
 	/// - Primary keys are always merged, it is assumed at most only name will be set. TODO: It gets weird in presence of mixins, e.g mixin can add another primary key, how that should be handled?
 	/// - Checks with the same name (+all unnamed) are merged using AND
 	/// - Unique constraints are merged the same way as the primary key, but unnamed uniques are not merged
 	/// - Indexes are merged the same way as unique constraints, except accounting for the uniqueness flag
 	pub fn merge(&mut self, rn: &RenameMap) {
-		let annotations = mem::take(&mut self.annotations);
+		let attributes = mem::take(&mut self.attributes);
 
 		// PK
-		let pk_name = annotations
+		let pk_name = attributes
 			.iter()
-			.filter_map(TableAnnotation::as_primary_key)
+			.filter_map(TableAttribute::as_primary_key)
 			.filter_map(|pk| pk.try_db(rn))
 			.at_most_one()
 			.expect("at most one pk have name set");
-		let (pks, mut annotations): (Vec<_>, Vec<_>) =
-			annotations.into_iter().partition_map(|a| match a {
-				TableAnnotation::PrimaryKey(pk) => Either::Left(pk),
+		let (pks, mut attributes): (Vec<_>, Vec<_>) =
+			attributes.into_iter().partition_map(|a| match a {
+				TableAttribute::PrimaryKey(pk) => Either::Left(pk),
 				a => Either::Right(a),
 			});
 		if !pks.is_empty() {
-			annotations.push(TableAnnotation::PrimaryKey(PrimaryKey::new(
+			attributes.push(TableAttribute::PrimaryKey(PrimaryKey::new(
 				pk_name,
 				pks.into_iter().flat_map(|pk| pk.columns).collect(),
 			)));
 		}
 
 		// Unique
-		let (unqs, mut annotations): (Vec<_>, Vec<_>) =
-			annotations.into_iter().partition_map(|a| match a {
-				TableAnnotation::Unique(u) => Either::Left(u),
+		let (unqs, mut attributes): (Vec<_>, Vec<_>) =
+			attributes.into_iter().partition_map(|a| match a {
+				TableAttribute::Unique(u) => Either::Left(u),
 				a => Either::Right(a),
 			});
 		let (named_unqs, unnamed_unqs) = unqs
@@ -239,19 +239,19 @@ impl Pgnc<&mut Table> {
 			.into_iter()
 			.collect::<BTreeMap<_, _>>();
 		for (name, cols) in named_unqs {
-			annotations.push(TableAnnotation::Unique(UniqueConstraint::new(
+			attributes.push(TableAttribute::Unique(UniqueConstraint::new(
 				Some(name),
 				cols.into_iter().flatten().collect(),
 			)))
 		}
 		for unq in unnamed_unqs {
-			annotations.push(TableAnnotation::Unique(unq));
+			attributes.push(TableAttribute::Unique(unq));
 		}
 
 		// Check
-		let (checks, mut annotations): (Vec<_>, Vec<_>) =
-			annotations.into_iter().partition_map(|a| match a {
-				TableAnnotation::Check(c) => Either::Left(c),
+		let (checks, mut attributes): (Vec<_>, Vec<_>) =
+			attributes.into_iter().partition_map(|a| match a {
+				TableAttribute::Check(c) => Either::Left(c),
 				a => Either::Right(a),
 			});
 		let (named_cks, unnamed_cks) = checks
@@ -264,22 +264,22 @@ impl Pgnc<&mut Table> {
 			.into_iter()
 			.collect::<BTreeMap<_, _>>();
 		for (name, checks) in named_cks {
-			annotations.push(TableAnnotation::Check(Check::new(
+			attributes.push(TableAttribute::Check(Check::new(
 				Some(name),
 				Sql::all(checks),
 			)))
 		}
 		if !unnamed_cks.is_empty() {
-			annotations.push(TableAnnotation::Check(Check::new(
+			attributes.push(TableAttribute::Check(Check::new(
 				None,
 				Sql::all(unnamed_cks.into_iter().map(|c| c.check)),
 			)));
 		}
 
 		// Index
-		let (indexes, mut annotations): (Vec<_>, Vec<_>) =
-			annotations.into_iter().partition_map(|a| match a {
-				TableAnnotation::Index(i) => Either::Left(i),
+		let (indexes, mut attributes): (Vec<_>, Vec<_>) =
+			attributes.into_iter().partition_map(|a| match a {
+				TableAttribute::Index(i) => Either::Left(i),
 				a => Either::Right(a),
 			});
 		let (named_idxs, unnamed_idxs) = indexes
@@ -303,7 +303,7 @@ impl Pgnc<&mut Table> {
 			.into_iter()
 			.collect::<BTreeMap<_, _>>();
 		for ((unique, using, default_opclass, with, name), fields) in named_idxs {
-			annotations.push(TableAnnotation::Index(Index::new(
+			attributes.push(TableAttribute::Index(Index::new(
 				Some(name),
 				unique,
 				fields.into_iter().flatten().collect(),
@@ -313,15 +313,15 @@ impl Pgnc<&mut Table> {
 			)))
 		}
 		for idx in unnamed_idxs {
-			annotations.push(TableAnnotation::Index(idx))
+			attributes.push(TableAttribute::Index(idx))
 		}
-		self.annotations = annotations;
+		self.attributes = attributes;
 	}
 	pub fn generate_names(&mut self, rn: &mut RenameMap) {
 		let mut decided_names = Vec::new();
-		for ann in self.annotations.iter() {
+		for ann in self.attributes.iter() {
 			match ann {
-				TableAnnotation::Index(i) if !i.db_assigned(rn) => {
+				TableAttribute::Index(i) if !i.db_assigned(rn) => {
 					let mut out = self.db(rn).raw().to_string();
 					for column in self.db_names(i.fields().iter().map(|v| &v.0).cloned(), rn) {
 						w!(out, "_{}", column.raw());
@@ -332,21 +332,21 @@ impl Pgnc<&mut Table> {
 						if i.unique { "key" } else { "idx" },
 					)));
 				}
-				TableAnnotation::Check(c) if !c.db_assigned(rn) => {
+				TableAttribute::Check(c) if !c.db_assigned(rn) => {
 					let mut out = self.db(rn).raw().to_string();
 					for ele in self.db_names(c.check.affected_columns(), rn) {
 						w!(out, "_{}", ele.raw());
 					}
 					decided_names.push(Some(truncate_auto_name(out, "check")));
 				}
-				TableAnnotation::Unique(u) if !u.db_assigned(rn) => {
+				TableAttribute::Unique(u) if !u.db_assigned(rn) => {
 					let mut out = self.db(rn).raw().to_string();
 					for ele in self.db_names(u.columns.iter().cloned(), rn) {
 						w!(out, "_{}", ele.raw());
 					}
 					decided_names.push(Some(truncate_auto_name(out, "key")));
 				}
-				TableAnnotation::PrimaryKey(p) if !p.db_assigned(rn) => {
+				TableAttribute::PrimaryKey(p) if !p.db_assigned(rn) => {
 					let mut out = self.db(rn).raw().to_string();
 					for ele in self.db_names(p.columns.iter().cloned(), rn) {
 						w!(out, "_{}", ele.raw());
@@ -356,20 +356,20 @@ impl Pgnc<&mut Table> {
 				_ => decided_names.push(None),
 			}
 		}
-		assert_eq!(decided_names.len(), self.annotations.len());
-		for (i, ann) in self.annotations.iter_mut().enumerate() {
+		assert_eq!(decided_names.len(), self.attributes.len());
+		for (i, ann) in self.attributes.iter_mut().enumerate() {
 			let name = decided_names[i].clone();
 			match ann {
-				TableAnnotation::Index(i) if !i.db_assigned(rn) => {
+				TableAttribute::Index(i) if !i.db_assigned(rn) => {
 					i.set_db(rn, DbIdent::new(&name.unwrap()));
 				}
-				TableAnnotation::PrimaryKey(p) if !p.db_assigned(rn) => {
+				TableAttribute::PrimaryKey(p) if !p.db_assigned(rn) => {
 					p.set_db(rn, DbIdent::new(&name.unwrap()));
 				}
-				TableAnnotation::Check(c) if !c.db_assigned(rn) => {
+				TableAttribute::Check(c) if !c.db_assigned(rn) => {
 					c.set_db(rn, DbIdent::new(&name.unwrap()));
 				}
-				TableAnnotation::Unique(u) if !u.db_assigned(rn) => {
+				TableAttribute::Unique(u) if !u.db_assigned(rn) => {
 					u.set_db(rn, DbIdent::new(&name.unwrap()));
 				}
 				_ => assert!(name.is_none(), "unexpected name for {ann:?}: {name:?}"),
@@ -436,7 +436,7 @@ impl Pgnc<&mut View> {
 		}
 		let id = self.id().name();
 		// FIXME: Report error on truncation
-		let id = if self.attrlist.get_single("pgnc", "as_is") == Ok(true) {
+		let id = if self.annotations.get_single("pgnc", "as_is") == Ok(true) {
 			id
 		} else {
 			let id = to_snake_case(&id);

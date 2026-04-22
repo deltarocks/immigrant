@@ -5,9 +5,9 @@ use crate::{HasDefaultDbName, ids::DbIdent};
 #[derive(PartialEq, Eq, Hash, Debug, Clone, Copy)]
 pub struct Uid(usize);
 
-/// OwnUid - Uid attached to annotation/something else
-/// It doesn't make sense to clone Annotation Uid, because if we do so, then
-/// changing name of annotation on table column also changes annotation name in scalar/other copies of this annotation
+/// OwnUid - Uid attached to attribute/something else
+/// It doesn't make sense to clone attribute Uid, because if we do so, then
+/// changing name of attribute on table column also changes attribute name in scalar/other copies of this attribute
 /// Because of that, cloning of OwnUid should also clone entry of RenameMap.
 #[derive(PartialEq, Eq, Hash, Debug)]
 #[repr(transparent)]

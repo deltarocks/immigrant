@@ -5,7 +5,7 @@ use itertools::Itertools;
 use super::column::Column;
 use crate::{
 	HasIdent, Index, SchemaTable, TableColumn, TableForeignKey, TableIndex, TableItem,
-	attribute::AttributeList,
+	annotation::AnnotationList,
 	db_name_impls, def_name_impls,
 	diagnostics::Report,
 	index::{Check, PrimaryKey, UniqueConstraint},
@@ -24,9 +24,9 @@ pub struct Table {
 	uid: OwnUid,
 	name: TableDefName,
 	pub docs: Vec<String>,
-	pub attrlist: AttributeList,
+	pub annotations: AnnotationList,
 	pub columns: Vec<Column>,
-	pub annotations: Vec<TableAnnotation>,
+	pub attributes: Vec<TableAttribute>,
 	pub foreign_keys: Vec<ForeignKey>,
 	pub mixins: Vec<MixinIdent>,
 }
@@ -34,10 +34,10 @@ def_name_impls!(Table, TableKind);
 impl Table {
 	pub fn new(
 		docs: Vec<String>,
-		attrlist: AttributeList,
+		annotations: AnnotationList,
 		name: TableDefName,
 		columns: Vec<Column>,
-		annotations: Vec<TableAnnotation>,
+		attributes: Vec<TableAttribute>,
 		foreign_keys: Vec<ForeignKey>,
 		mixins: Vec<MixinIdent>,
 	) -> Self {
@@ -45,48 +45,48 @@ impl Table {
 			uid: next_uid(),
 			name,
 			docs,
-			attrlist,
-			columns,
 			annotations,
+			columns,
+			attributes,
 			foreign_keys,
 			mixins,
 		}
 	}
 	pub fn primary_key(&self) -> Option<&PrimaryKey> {
-		self.annotations
+		self.attributes
 			.iter()
-			.filter_map(TableAnnotation::as_primary_key)
+			.filter_map(TableAttribute::as_primary_key)
 			.at_most_one()
 			.expect("at most one pk")
 	}
 	pub fn is_external(&self) -> bool {
-		self.annotations
+		self.attributes
 			.iter()
-			.any(|a| matches!(a, TableAnnotation::External))
+			.any(|a| matches!(a, TableAttribute::External))
 	}
 	pub(crate) fn assimilate_mixin(&mut self, mixin: &Mixin) {
 		let Mixin {
 			docs,
-			attrlist,
-			columns,
 			annotations,
+			columns,
+			attributes,
 			foreign_keys,
 			mixins,
 			..
 		} = mixin;
 		self.docs.extend_from_slice(docs);
-		self.attrlist.0.extend_from_slice(&attrlist.0);
+		self.annotations.0.extend_from_slice(&annotations.0);
 		self.columns
 			.extend(columns.iter().map(|c| c.clone_for_mixin()));
-		self.annotations
-			.extend(annotations.iter().map(|a| a.clone_for_mixin()));
+		self.attributes
+			.extend(attributes.iter().map(|a| a.clone_for_mixin()));
 		self.foreign_keys
 			.extend(foreign_keys.iter().map(|fk| fk.clone_for_mixin()));
 		self.mixins.extend(mixins.clone());
 	}
 }
 #[derive(Debug)]
-pub enum TableAnnotation {
+pub enum TableAttribute {
 	Check(Check),
 	Unique(UniqueConstraint),
 	PrimaryKey(PrimaryKey),
@@ -153,10 +153,10 @@ impl ForeignKey {
 	}
 }
 
-impl TableAnnotation {
+impl TableAttribute {
 	pub fn as_index(&self) -> Option<&Index> {
 		match self {
-			TableAnnotation::Index(i) => Some(i),
+			TableAttribute::Index(i) => Some(i),
 			_ => None,
 		}
 	}
@@ -187,11 +187,11 @@ impl TableAnnotation {
 
 	pub fn clone_for_mixin(&self) -> Self {
 		match self {
-			TableAnnotation::Check(c) => Self::Check(c.clone_for_propagate()),
-			TableAnnotation::Unique(u) => Self::Unique(u.clone_for_propagate()),
-			TableAnnotation::PrimaryKey(p) => Self::PrimaryKey(p.clone_for_propagate()),
-			TableAnnotation::Index(i) => Self::Index(i.clone_for_propagate()),
-			TableAnnotation::External => Self::External,
+			TableAttribute::Check(c) => Self::Check(c.clone_for_propagate()),
+			TableAttribute::Unique(u) => Self::Unique(u.clone_for_propagate()),
+			TableAttribute::PrimaryKey(p) => Self::PrimaryKey(p.clone_for_propagate()),
+			TableAttribute::Index(i) => Self::Index(i.clone_for_propagate()),
+			TableAttribute::External => Self::External,
 		}
 	}
 }
@@ -199,8 +199,8 @@ impl TableAnnotation {
 impl Table {
 	pub fn process(&mut self) {
 		for column in self.columns.iter_mut() {
-			let propagated = column.propagate_annotations();
-			self.annotations.extend(propagated);
+			let propagated = column.propagate_attributes();
+			self.attributes.extend(propagated);
 			if let Some(fk) = column.propagate_foreign_key() {
 				self.foreign_keys.push(fk);
 			}
@@ -276,15 +276,15 @@ impl<'a> SchemaTable<'a> {
 		self.columns.iter().map(|i| self.item(i))
 	}
 	pub fn indexes(&self) -> impl Iterator<Item = TableIndex<'_>> {
-		self.annotations
+		self.attributes
 			.iter()
-			.filter_map(TableAnnotation::as_index)
+			.filter_map(TableAttribute::as_index)
 			.map(|i| self.item(i))
 	}
 	pub fn pk(&self) -> Option<&PrimaryKey> {
-		self.annotations
+		self.attributes
 			.iter()
-			.filter_map(TableAnnotation::as_primary_key)
+			.filter_map(TableAttribute::as_primary_key)
 			.at_most_one()
 			.expect("pk is not merged")
 	}
@@ -310,25 +310,25 @@ impl<'a> SchemaTable<'a> {
 			false
 		}
 		let columns = columns.into_iter().collect::<BTreeSet<_>>();
-		for ele in self.annotations.iter() {
+		for ele in self.attributes.iter() {
 			match ele {
-				TableAnnotation::Index(i) => {
+				TableAttribute::Index(i) => {
 					if i.unique && is_unique_by_index(i.field_idents(), &columns) {
 						return Cardinality::One;
 					}
 				}
-				TableAnnotation::PrimaryKey(pk) => {
+				TableAttribute::PrimaryKey(pk) => {
 					if is_unique_by_index(pk.columns.iter().copied(), &columns) {
 						return Cardinality::One;
 					}
 				}
-				TableAnnotation::Unique(u) => {
+				TableAttribute::Unique(u) => {
 					if is_unique_by_index(u.columns.iter().copied(), &columns) {
 						return Cardinality::One;
 					}
 				}
-				TableAnnotation::Check { .. } => {}
-				TableAnnotation::External => {}
+				TableAttribute::Check { .. } => {}
+				TableAttribute::External => {}
 			}
 		}
 		// FIXME: Wrong assumption? When target is one, it doesn't mean the source is one too

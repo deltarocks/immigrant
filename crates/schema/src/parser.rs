@@ -6,9 +6,9 @@ use std::{
 use peg::{error::ParseError, parser, str::LineCol};
 
 use crate::{
-	attribute::{Attribute, AttributeField, AttributeList, AttributeValue},
-	column::{Column, ColumnAnnotation, PartialForeignKey},
-	composite::{Composite, CompositeAnnotation, Field, FieldAnnotation},
+	annotation::{Annotation, AnnotationField, AnnotationList, AnnotationValue},
+	column::{Column, ColumnAttribute, PartialForeignKey},
+	composite::{Composite, CompositeAttribute, Field, FieldAttribute},
 	diagnostics::Report,
 	ids::{DbIdent, in_allocator},
 	index::{Check, Index, OpClass, PrimaryKey, UniqueConstraint, Using, With},
@@ -18,10 +18,10 @@ use crate::{
 		TableIdent, TypeDefName, TypeIdent, ViewDefName,
 	},
 	root::{Item, Schema, SchemaProcessOptions},
-	scalar::{Enum, EnumItem, InlineSqlType, InlineSqlTypePart, Scalar, ScalarAnnotation},
+	scalar::{Enum, EnumItem, InlineSqlType, InlineSqlTypePart, Scalar, ScalarAttribute},
 	span::{SimpleSpan, SourceId, register_source},
 	sql::{Sql, SqlOp, SqlUnOp},
-	table::{ForeignKey, OnDelete, Table, TableAnnotation},
+	table::{ForeignKey, OnDelete, Table, TableAttribute},
 	uid::RenameMap,
 	view::{Definition, DefinitionPart, View},
 };
@@ -50,10 +50,10 @@ impl S {
 		let ident = TypeIdent::alloc((span, &name));
 		let scalar = Scalar::new(
 			vec!["Inlined scalar".to_owned()],
-			AttributeList(vec![]),
+			AnnotationList(vec![]),
 			TypeDefName::unchecked_new(ident, None),
 			def,
-			vec![ScalarAnnotation::Inline],
+			vec![ScalarAttribute::Inline],
 		);
 		(ident, Some(scalar))
 	}
@@ -79,20 +79,20 @@ rule item(s:&S) -> (Item, Vec<Scalar>)
 
 rule mixin(s:&S) -> (Mixin, Vec<Scalar>) =
 	docs:docs()
-	attrlist:attribute_list(s) _
+	annotations:annotation_list(s) _
 	"@mixin" _ name:code_ident(s) _ "{" _
 		mixins:("@mixin" _ f:code_ident(s) _ ";" {MixinIdent::alloc(f)})**_ _
 		fields:(f:table_field(s) _ ";" {f})++_ _
-		annotations:(a:table_annotation(s) _ ";" {a})**_ _
+		attributes:(a:table_attribute(s) _ ";" {a})**_ _
 		foreign_keys:(f:foreign_key(s) _ ";" {f})**_ _
 	"}" _ ";" {{
 	let (fields, scalars): (Vec<Column>, Vec<Option<Scalar>>) = fields.into_iter().unzip();
 	(Mixin::new(
 		docs,
-		attrlist,
+		annotations,
 		MixinIdent::alloc(name),
 		fields,
-		annotations,
+		attributes,
 		foreign_keys,
 		mixins,
 	), scalars.into_iter().flatten().collect())
@@ -100,20 +100,20 @@ rule mixin(s:&S) -> (Mixin, Vec<Scalar>) =
 
 rule table(s:&S) -> (Table, Vec<Scalar>) =
 	docs:docs()
-	attrlist:attribute_list(s) _
+	annotations:annotation_list(s) _
 	"table" _ name:def_name(s) _ "{" _
 		mixins:("@mixin" _ f:code_ident(s) _ ";" {MixinIdent::alloc(f)})**_ _
 		fields:(f:table_field(s) _ ";" {f})++_ _
-		annotations:(a:table_annotation(s) _ ";" {a})**_ _
+		attributes:(a:table_attribute(s) _ ";" {a})**_ _
 		foreign_keys:(f:foreign_key(s) _ ";" {f})**_ _
 	"}" _ ";" {{
 	let (fields, scalars): (Vec<Column>, Vec<Option<Scalar>>) = fields.into_iter().unzip();
 	(Table::new(
 		docs,
-		attrlist,
+		annotations,
 		TableDefName::alloc(name),
 		fields,
-		annotations,
+		attributes,
 		foreign_keys,
 		mixins,
 	), scalars.into_iter().flatten().collect())
@@ -145,11 +145,11 @@ rule inline_sql(s:&S) -> InlineSqlType = parts:(
 / s:compat_only(s, <str()>) {InlineSqlType(vec![InlineSqlTypePart::Raw(s.to_string())])}
 rule view(s:&S) -> View =
 	docs:docs()
-	attrlist:attribute_list(s) _
+	annotations:annotation_list(s) _
 	"view" materialized:(_ "." _ "materialized")? _ name:def_name(s) _ "=" _ definition:definition(s) _ ";" {{
 	View::new(
 		docs,
-		attrlist,
+		annotations,
 		ViewDefName::alloc(name),
 		materialized.is_some(),
 		definition,
@@ -157,42 +157,42 @@ rule view(s:&S) -> View =
 }};
 rule enum(s:&S) -> Enum =
 	docs:docs()
-	attrlist:attribute_list(s) _
+	annotations:annotation_list(s) _
 	"enum" _ name:def_name(s) _ "{" _ items:(
 		docs:docs()
 		name:def_name(s)
 	{(docs, name)})++(_ ";" _) _ ";"? _ "}" _ ";" {
-	Enum::new(docs, attrlist, TypeDefName::alloc(name), items.into_iter()
+	Enum::new(docs, annotations, TypeDefName::alloc(name), items.into_iter()
 		.map(|(docs, name)| EnumItem::new(docs, EnumItemDefName::alloc(name))).collect()
 	)
 };
 rule scalar(s:&S) -> Scalar =
 	docs:docs()
-	attrlist:attribute_list(s) _
-	"scalar" _ name:def_name(s) _ "=" _ native:inline_sql(s) _ annotations:scalar_annotation(s)**_ ";" {
-	Scalar::new(docs, attrlist, TypeDefName::alloc(name), native, annotations)
+	annotations:annotation_list(s) _
+	"scalar" _ name:def_name(s) _ "=" _ native:inline_sql(s) _ attributes:scalar_attribute(s)**_ ";" {
+	Scalar::new(docs, annotations, TypeDefName::alloc(name), native, attributes)
 }
 rule composite(s:&S) -> Composite =
 	docs:docs()
-	attrlist:attribute_list(s) _
+	annotations:annotation_list(s) _
 	"struct" _ name:def_name(s) _ "{" _
 		fields:(f:field(s) _ ";" {f})++_ _
-		annotations:(a:composite_annotation(s) _ ";" {a})**_ _
+		attributes:(a:composite_attribute(s) _ ";" {a})**_ _
 	"}" _ ";" {
-	Composite::new(docs, attrlist, TypeDefName::alloc(name), fields, annotations)
+	Composite::new(docs, annotations, TypeDefName::alloc(name), fields, attributes)
 }
 rule field(s:&S) -> Field =
 	docs:docs()
 	name:def_name(s) _
 	t:(":" _ i:code_ident(s) _ {i})?
 	n:("?" _)?
-	annotations:field_annotation(s)**_ {
+	attributes:field_attribute(s)**_ {
 	Field::new(
 		docs,
 		DefName::alloc(name),
 		n.is_some(),
 		TypeIdent::alloc(t.unwrap_or((name.0, name.1))),
-		annotations
+		attributes
 	)
 }
 
@@ -205,11 +205,11 @@ rule maybe_inline_scalar(s:&S) -> (TypeIdent, Option<Scalar>) =
 
 rule table_field(s:&S) -> (Column, Option<Scalar>) =
 	docs:docs()
-	attrlist:attribute_list(s) _
+	annotations:annotation_list(s) _
 	name:def_name(s) _
 	t:(":" _ i:maybe_inline_scalar(s) _ {i})?
 	n:("?" _)?
-	annotations:column_annotation(s)**_
+	attributes:column_attribute(s)**_
 	foreign_key:partial_foreign_key(s)? {
 	let (ty, scalars) = match t {
 		Some(v) => v,
@@ -218,53 +218,53 @@ rule table_field(s:&S) -> (Column, Option<Scalar>) =
 	(Column::new(
 		DefName::alloc(name),
 		docs,
-		attrlist,
+		annotations,
 		n.is_some(),
 		ty,
-		annotations,
+		attributes,
 		foreign_key
 	), scalars)
 }
 
-rule attribute_list(s:&S) -> AttributeList
-= list:attribute(s) ** _ {AttributeList(list)}
-rule attribute(s:&S) -> Attribute
-= "#" _ name:code_ident(s) fields:(_ "(" _ f:(f:attribute_field(s)++comma() trailing_comma() {f}) _ ")" {f})? {
-	Attribute {
+rule annotation_list(s:&S) -> AnnotationList
+= list:annotation(s) ** _ {AnnotationList(list)}
+rule annotation(s:&S) -> Annotation
+= "#" _ name:code_ident(s) fields:(_ "(" _ f:(f:annotation_field(s)++comma() trailing_comma() {f}) _ ")" {f})? {
+	Annotation {
 		name: name.1.to_owned(),
 		fields: fields.unwrap_or_default(),
 	}
 }
-rule attribute_field(s:&S) -> AttributeField
-= key:code_ident(s) v:(_ "=" _ value:attribute_value() {value})? {AttributeField {key: key.1.to_owned(), value: v.unwrap_or(AttributeValue::Set)}}
-rule attribute_value() -> AttributeValue
-= s:str() {AttributeValue::String(s.to_owned())}
+rule annotation_field(s:&S) -> AnnotationField
+= key:code_ident(s) v:(_ "=" _ value:annotation_value() {value})? {AnnotationField {key: key.1.to_owned(), value: v.unwrap_or(AnnotationValue::Set)}}
+rule annotation_value() -> AnnotationValue
+= s:str() {AnnotationValue::String(s.to_owned())}
 
-rule scalar_annotation(s:&S) -> ScalarAnnotation
-= c:check(s) {ScalarAnnotation::Check(c)}
-/ u:unique(s) {ScalarAnnotation::Unique(u)}
-/ pk:primary_key(s) {ScalarAnnotation::PrimaryKey(pk)}
-/ d:default(s) {ScalarAnnotation::Default(d)}
-/ i:index(s) {ScalarAnnotation::Index(i)}
-/ "@inline" {ScalarAnnotation::Inline}
-/ "@external" {ScalarAnnotation::External}
-rule column_annotation(s:&S) -> ColumnAnnotation
-= i:index(s) {ColumnAnnotation::Index(i)}
-/ c:check(s) {ColumnAnnotation::Check(c)}
-/ u:unique(s) {ColumnAnnotation::Unique(u)}
-/ pk:primary_key(s) {ColumnAnnotation::PrimaryKey(pk)}
-/ d:default(s) {ColumnAnnotation::Default(d)}
-/ d:initialize_as(s) {ColumnAnnotation::InitializeAs(d)}
-rule table_annotation(s:&S) -> TableAnnotation
-= c:check(s) {TableAnnotation::Check(c)}
-/ u:unique(s) {TableAnnotation::Unique(u)}
-/ pk:primary_key(s) {TableAnnotation::PrimaryKey(pk)}
-/ i:index(s) {TableAnnotation::Index(i)}
-/ "@external" {TableAnnotation::External}
-rule composite_annotation(s:&S) -> CompositeAnnotation
-= c:check(s) {CompositeAnnotation::Check(c)}
-rule field_annotation(s:&S) -> FieldAnnotation
-= c:check(s) {FieldAnnotation::Check(c)}
+rule scalar_attribute(s:&S) -> ScalarAttribute
+= c:check(s) {ScalarAttribute::Check(c)}
+/ u:unique(s) {ScalarAttribute::Unique(u)}
+/ pk:primary_key(s) {ScalarAttribute::PrimaryKey(pk)}
+/ d:default(s) {ScalarAttribute::Default(d)}
+/ i:index(s) {ScalarAttribute::Index(i)}
+/ "@inline" {ScalarAttribute::Inline}
+/ "@external" {ScalarAttribute::External}
+rule column_attribute(s:&S) -> ColumnAttribute
+= i:index(s) {ColumnAttribute::Index(i)}
+/ c:check(s) {ColumnAttribute::Check(c)}
+/ u:unique(s) {ColumnAttribute::Unique(u)}
+/ pk:primary_key(s) {ColumnAttribute::PrimaryKey(pk)}
+/ d:default(s) {ColumnAttribute::Default(d)}
+/ d:initialize_as(s) {ColumnAttribute::InitializeAs(d)}
+rule table_attribute(s:&S) -> TableAttribute
+= c:check(s) {TableAttribute::Check(c)}
+/ u:unique(s) {TableAttribute::Unique(u)}
+/ pk:primary_key(s) {TableAttribute::PrimaryKey(pk)}
+/ i:index(s) {TableAttribute::Index(i)}
+/ "@external" {TableAttribute::External}
+rule composite_attribute(s:&S) -> CompositeAttribute
+= c:check(s) {CompositeAttribute::Check(c)}
+rule field_attribute(s:&S) -> FieldAttribute
+= c:check(s) {FieldAttribute::Check(c)}
 
 rule def_name(s:&S) -> (SimpleSpan, &'input str, Option<&'input str>)
 = c:code_ident(s) d:(_ d:db_ident() {d})? {

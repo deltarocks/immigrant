@@ -20,7 +20,7 @@ use schema::{
 	},
 	renamelist::RenameOp,
 	root::Schema,
-	scalar::{EnumItemHandle, ScalarAnnotation},
+	scalar::{EnumItemHandle, ScalarAttribute},
 	sql::{Sql, SqlOp},
 	uid::{RenameExt, RenameMap},
 	view::DefinitionPart,
@@ -1252,15 +1252,15 @@ impl Pg<SchemaScalar<'_>> {
 		let name = Id(self.db(rn));
 		let ty = self.inner_type(rn, report);
 		w!(sql, "CREATE DOMAIN {name} AS {}", ty.raw());
-		for ele in &self.annotations {
+		for ele in &self.attributes {
 			match ele {
-				ScalarAnnotation::Default(d) => {
+				ScalarAttribute::Default(d) => {
 					w!(sql, "\n\tDEFAULT ");
 					let formatted =
 						Pg(self.schema).format_sql(d, SchemaItem::Scalar(self.0), rn, report);
 					w!(sql, "{formatted}");
 				}
-				ScalarAnnotation::Check(check) => {
+				ScalarAttribute::Check(check) => {
 					let name = Id(check.db(rn));
 					w!(sql, "\n\tCONSTRAINT {name} CHECK (");
 					let formatted = Pg(self.schema).format_sql(
@@ -1271,12 +1271,12 @@ impl Pg<SchemaScalar<'_>> {
 					);
 					w!(sql, "{formatted})");
 				}
-				ScalarAnnotation::Inline | ScalarAnnotation::External => {
+				ScalarAttribute::Inline | ScalarAttribute::External => {
 					unreachable!("non-material scalars are not created")
 				}
-				ScalarAnnotation::Index(_)
-				| ScalarAnnotation::Unique(_)
-				| ScalarAnnotation::PrimaryKey(_) => {
+				ScalarAttribute::Index(_)
+				| ScalarAttribute::Unique(_)
+				| ScalarAttribute::PrimaryKey(_) => {
 					unreachable!("only check constrains are allowed on domain scalars")
 				}
 			}
@@ -1328,9 +1328,9 @@ impl Pg<Diff<SchemaScalar<'_>>> {
 	) {
 		let mut new = self
 			.new
-			.annotations
+			.attributes
 			.iter()
-			.filter_map(ScalarAnnotation::as_check)
+			.filter_map(ScalarAttribute::as_check)
 			.map(|c| {
 				let mut sql = String::new();
 				Pg(self.new.schema.sql(&c.check)).print(
@@ -1344,9 +1344,9 @@ impl Pg<Diff<SchemaScalar<'_>>> {
 			.collect::<Vec<_>>();
 		let old = self
 			.old
-			.annotations
+			.attributes
 			.iter()
-			.filter_map(ScalarAnnotation::as_check)
+			.filter_map(ScalarAttribute::as_check)
 			.collect::<Vec<_>>();
 		let mut out = Vec::new();
 		for ann in &old {
