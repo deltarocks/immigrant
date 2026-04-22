@@ -9,10 +9,10 @@ description = "Immigrant CLI helper for postgres migration"
 anyhow.workspace = true
 cli.workspace = true
 file-diffs.workspace = true
-futures = "0.3.31"
 schema = { workspace = true, features = ["tree-sitter-highlight"] }
 slug = "0.1.6"
-sqlx = { version = "0.8.6", features = ["runtime-tokio", "postgres", "macros"] }
+diesel = { version = "2.3", features = ["postgres"] }
+diesel-async = { version = "0.8", features = ["postgres"] }
 tokio = { version = "1.49.0", features = ["macros"] }
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 clap.workspace = true

@@ -1,11 +1,19 @@
+#![allow(
+	clippy::get_first,
+	reason = "vec.first() is being resolved as RunQueryDsl, thus .get(0) should be used: https://github.com/diesel-rs/diesel_async/issues/142, https://github.com/rust-lang/rust/issues/127306"
+)]
 use std::{env, env::current_dir, fs};
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 use cli::{current_schema, display_reports, generate_sql, generate_sql_nowrite, stored_schema};
+use diesel::sql_query;
+use diesel::sql_types::{Integer, Nullable, Text};
+use diesel_async::{
+	AnsiTransactionManager, AsyncConnection as _, AsyncPgConnection, RunQueryDsl as _,
+	SimpleAsyncConnection as _, TransactionManager as _,
+};
 use file_diffs::{Migration, MigrationId, find_root, list};
-use futures::StreamExt;
-use sqlx::{Acquire, Executor, Postgres, Transaction, postgres::PgPoolOptions};
 use tracing::{error, warn};
 
 #[derive(Parser)]
@@ -59,36 +67,44 @@ struct Opts {
 }
 
 async fn run_migrations(
-	conn: &mut Transaction<'_, Postgres>,
+	conn: &mut AsyncPgConnection,
 	id: u32,
 	migration: String,
 	migrations_table: &str,
 	schema_str: &str,
 ) -> Result<()> {
-	let mut tx = conn.begin().await?;
+	AnsiTransactionManager::begin_transaction(conn).await?;
 
-	tx.execute(
-		sqlx::query(
-			format!("INSERT INTO {migrations_table}(version, schema) VALUES ($1, $2);").as_str(),
-		)
-		.bind(id as i32)
-		.bind(schema_str),
-	)
-	.await?;
-	{
-		let mut executing = tx.execute_many(migration.as_str());
-		while let Some(v) = executing.next().await {
-			let _res = v?;
+	let result: Result<(), diesel::result::Error> = async {
+		sql_query(format!(
+			"INSERT INTO {migrations_table}(version, schema) VALUES ($1, $2);"
+		))
+		.bind::<Integer, _>(id as i32)
+		.bind::<Text, _>(schema_str)
+		.execute(conn)
+		.await?;
+		conn.batch_execute(&migration).await?;
+		Ok(())
+	}
+	.await;
+
+	match result {
+		Ok(()) => {
+			AnsiTransactionManager::commit_transaction(conn).await?;
+			Ok(())
+		}
+		Err(e) => {
+			AnsiTransactionManager::rollback_transaction(conn).await?;
+			Err(e.into())
 		}
 	}
-
-	tx.commit().await?;
-	Ok(())
 }
 
-#[derive(sqlx::FromRow)]
+#[derive(diesel::QueryableByName)]
 struct RanMigration {
+	#[diesel(sql_type = Integer)]
 	version: i32,
+	#[diesel(sql_type = Nullable<Text>)]
 	schema: Option<String>,
 }
 
@@ -100,11 +116,9 @@ async fn main() -> Result<()> {
 	let migrations_table = &opts.migrations_table;
 
 	let database_url = env::var("DATABASE_URL")?;
-	let pool = PgPoolOptions::new().connect(&database_url).await?;
-	let mut conn = pool.acquire().await?;
-	conn.execute(
-		format!(
-			r#"
+	let mut conn = AsyncPgConnection::establish(&database_url).await?;
+	conn.batch_execute(&format!(
+		r#"
 				CREATE TABLE IF NOT EXISTS {migrations_table} (
 					version INTEGER NOT NULL PRIMARY KEY,
 					run_on TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -113,19 +127,16 @@ async fn main() -> Result<()> {
 				);
 				ALTER TABLE {migrations_table} ADD COLUMN IF NOT EXISTS schema TEXT;
 			"#
-		)
-		.as_str(),
-	)
+	))
 	.await?;
-	let mut ran_migrations = sqlx::query_as::<_, RanMigration>(
-		"SELECT version, schema FROM __immigrant_migrations ORDER BY version",
-	)
-	.fetch_all(&mut *conn)
-	.await?;
+	let mut ran_migrations: Vec<RanMigration> =
+		sql_query("SELECT version, schema FROM __immigrant_migrations ORDER BY version")
+			.load(&mut conn)
+			.await?;
 	for migration in ran_migrations.iter() {
 		assert!(migration.version >= 0);
 	}
-	let first_version = ran_migrations.first().map(|m| m.version as u32);
+	let first_version = ran_migrations.get(0).map(|m| m.version as u32);
 	// Not all migrations might be recorded, but they must be continous
 	for (ran, expected) in ran_migrations
 		.iter()
@@ -139,7 +150,7 @@ async fn main() -> Result<()> {
 	let mut mismatched_ids = vec![];
 
 	// TODO: Option to disable top-level transaction
-	let mut tx = conn.begin().await?;
+	AnsiTransactionManager::begin_transaction(&mut conn).await?;
 	let root = find_root(&current_dir()?).context("failed to discover root")?;
 	let list = list(&root).context("failed to list migrations")?;
 
@@ -147,28 +158,24 @@ async fn main() -> Result<()> {
 		let check_str = schema.schema_check_string();
 		'run_migration: {
 			let Some(first_version) = first_version else {
-				// No migrations were ran yet,
 				break 'run_migration;
 			};
 			let Some(ran_id) = id.id.checked_sub(first_version) else {
-				// Migration version was removed from DB, yet it was run.
 				continue 'next_migration;
 			};
 			let Some(migration) = ran_migrations.get_mut(ran_id as usize) else {
-				// This migration was not yet ran
 				break 'run_migration;
 			};
 			let Some(expected_schema) = &migration.schema else {
-				// No stored expected schema, continue with migration
 				continue 'next_migration;
 			};
 			if expected_schema.trim() != check_str.trim() {
 				if opts.unsafe_override_mismatched.contains(&id.id) {
 					warn!("overriding migration {id:?}");
-					sqlx::query("UPDATE __immigrant_migrations SET schema = $1 WHERE version = $2")
-						.bind(&check_str)
-						.bind(id.id as i32)
-						.execute(&mut *tx)
+					sql_query("UPDATE __immigrant_migrations SET schema = $1 WHERE version = $2")
+						.bind::<Text, _>(&check_str)
+						.bind::<Integer, _>(id.id as i32)
+						.execute(&mut conn)
 						.await?;
 					migration.schema = Some(check_str);
 				} else {
@@ -191,7 +198,7 @@ async fn main() -> Result<()> {
 		let mut path = path.to_owned();
 		path.push("up.sql");
 		let sql = fs::read_to_string(&path).context("reading migration up.sql file")?;
-		run_migrations(&mut tx, id.id, sql, migrations_table, &check_str).await?;
+		run_migrations(&mut conn, id.id, sql, migrations_table, &check_str).await?;
 	}
 	if had_mismatched_migrations {
 		bail!(
@@ -227,7 +234,7 @@ async fn main() -> Result<()> {
 				bail!("Dirty database schema, not applying");
 			}
 			if !opts.dry_run {
-				tx.commit().await?;
+				AnsiTransactionManager::commit_transaction(&mut conn).await?;
 			} else {
 				println!("Dry-run succeeded");
 			}
@@ -269,7 +276,7 @@ async fn main() -> Result<()> {
 				println!("No changes found");
 				// Still need to preserve previous migrations state.
 				if !opts.dry_run {
-					tx.commit().await?;
+					AnsiTransactionManager::commit_transaction(&mut conn).await?;
 				}
 				return Ok(());
 			}
@@ -291,7 +298,7 @@ async fn main() -> Result<()> {
 				bail!("errors are reported, cannot continue");
 			}
 			if let Err(e) = run_migrations(
-				&mut tx,
+				&mut conn,
 				id.id,
 				sql.clone(),
 				migrations_table,
@@ -314,7 +321,7 @@ async fn main() -> Result<()> {
 				fs::write(schema_update, migration.to_string()).context("writing db.update")?;
 			}
 			if !opts.dry_run {
-				tx.commit().await?;
+				AnsiTransactionManager::commit_transaction(&mut conn).await?;
 			} else {
 				println!("Dry-run succeeded");
 			}
