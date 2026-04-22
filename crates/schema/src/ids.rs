@@ -17,20 +17,12 @@ pub struct CodeIdentAllocator {
 	max_id: Cell<u16>,
 
 	#[cfg(feature = "strict")]
-	generation: Cell<u8>,
-	max_kind: Cell<u8>,
+	generation: Cell<u32>,
 }
 impl CodeIdentAllocator {
 	#[cfg(feature = "strict")]
 	pub fn next_generation(&self) {
-		let max_kind = self.max_kind.get();
-		self.generation.set(
-			self.generation
-				.get()
-				.checked_add(max_kind + 1)
-				.expect("out of generations"),
-		);
-		self.max_kind.set(0);
+		self.generation.set(self.generation.get() + 1);
 	}
 	fn name(&self, id: u16) -> String {
 		let ids = self.ids.borrow();
@@ -42,21 +34,16 @@ impl CodeIdentAllocator {
 		unreachable!("identifier with unknown owner")
 	}
 	fn ident<K: Kind>(&self, span: SimpleSpan, name: &str) -> Ident<K> {
-		let kind = K::id();
-		self.max_kind.set(self.max_kind.get().max(kind));
 		#[cfg(feature = "strict")]
-		let kind = {
-			self.generation
-				.get()
-				.checked_add(kind)
-				.expect("out of kinds")
-		};
+		let generation = self.generation.get();
 		let mut ids = self.ids.borrow_mut();
 		match ids.entry(name.to_owned()) {
 			Entry::Occupied(v) => {
 				return Ident {
 					#[cfg(feature = "strict")]
-					kind,
+					generation,
+					#[cfg(feature = "strict")]
+					kind: K::id(),
 					id: *v.get(),
 					span,
 					_marker: PhantomData,
@@ -68,7 +55,9 @@ impl CodeIdentAllocator {
 				v.insert(id);
 				Ident {
 					#[cfg(feature = "strict")]
-					kind,
+					generation,
+					#[cfg(feature = "strict")]
+					kind: K::id(),
 					id,
 					span,
 					_marker: PhantomData,
@@ -102,6 +91,8 @@ pub fn in_allocator<T>(f: impl FnOnce() -> T) -> T {
 
 pub struct Ident<K> {
 	#[cfg(feature = "strict")]
+	generation: u32,
+	#[cfg(feature = "strict")]
 	kind: u8,
 	id: u16,
 	span: SimpleSpan,
@@ -130,6 +121,8 @@ impl<K: Kind> Ident<K> {
 		);
 		Ident {
 			#[cfg(feature = "strict")]
+			generation: v.generation,
+			#[cfg(feature = "strict")]
 			kind: v.kind,
 			id: v.id,
 			span: v.span,
@@ -139,6 +132,8 @@ impl<K: Kind> Ident<K> {
 	pub fn to_unknown(self) -> Ident<UnknownKind> {
 		// Not using unchecked_cast to skip compatibility check
 		Ident {
+			#[cfg(feature = "strict")]
+			generation: self.generation,
 			#[cfg(feature = "strict")]
 			kind: UnknownKind::id(),
 			id: self.id,
@@ -156,9 +151,9 @@ impl<K> Copy for Ident<K> {}
 impl<K> PartialEq for Ident<K> {
 	fn eq(&self, other: &Ident<K>) -> bool {
 		#[cfg(feature = "strict")]
-		assert_eq!(
-			self.kind, other.kind,
-			"comparing idents of a different generations"
+		assert!(
+			self.generation == other.generation && self.kind == other.kind,
+			"comparing idents of different generations"
 		);
 		self.id == other.id
 	}
@@ -167,9 +162,9 @@ impl<K> Eq for Ident<K> {}
 impl<K> Ord for Ident<K> {
 	fn cmp(&self, other: &Ident<K>) -> Ordering {
 		#[cfg(feature = "strict")]
-		assert_eq!(
-			self.kind, other.kind,
-			"comparing idents of a different generations"
+		assert!(
+			self.generation == other.generation && self.kind == other.kind,
+			"comparing idents of different generations"
 		);
 		self.id.cmp(&other.id)
 	}
