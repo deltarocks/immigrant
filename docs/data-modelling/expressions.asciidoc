@@ -1,5 +1,6 @@
 
 = SQL Expression Language
+:order: 4
 
 Used in `@check`, `@default`, and `@initialize_as`. This is not raw SQL. Immigrant has its own expression syntax that compiles to SQL.
 
@@ -65,7 +66,7 @@ table Example {
         /// function call
         @check(char_length(_) > 0)
         /// cast
-        @check(_ :: sql"BIGINT" > 0)
+        @check(_ :: BIGINT > 0)
         /// conditional (CASE WHEN ... THEN ... ELSE ... END)
         @check(if _ > 10 then true else false)
     ;

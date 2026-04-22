@@ -1,5 +1,6 @@
 
 = Tables
+:order: 1
 
 [source,immigrant]
 ----

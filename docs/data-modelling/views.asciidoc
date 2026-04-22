@@ -1,5 +1,6 @@
 
 = Views
+:order: 2
 
 Views wrap a SQL query. Use `{TableName}` to reference tables and `{TableName.column}` to reference columns. Immigrant substitutes actual database names:
 

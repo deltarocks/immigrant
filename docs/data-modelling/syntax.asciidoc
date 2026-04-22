@@ -1,8 +1,6 @@
 
 = Immigrant Schema Language
-:toc: left
-:toclevels: 3
-:source-highlighter: rouge
+:order: 0
 
 == Quick Start
 
@@ -38,7 +36,7 @@ Every item has a *code name* (used in schema references) and an optional *databa
 
 [source,immigrant]
 ----
-table UserProfile "user_profiles" { ... };
+table UserProfile "user_profiles" {};
 scalar user_id "uid" = sql"INTEGER";
 enum status "account_status" { active; inactive; };
 ----
@@ -177,10 +175,6 @@ struct range {
 };
 ----
 
-include::tables.asciidoc[leveloffset=+2]
-
-include::views.asciidoc[leveloffset=+2]
-
 == Annotations
 
 Generic annotations (`#...`) attach metadata for code generators. They do not affect SQL output, but are preserved for tools like diesel code generation:
@@ -196,11 +190,6 @@ enum client_kind { ... };
 
 Annotations can be placed before any item (scalar, enum, struct, table) or before individual columns and enum variants.
 
-include::foreign-keys.asciidoc[leveloffset=+1]
-
-include::expressions.asciidoc[leveloffset=+1]
-
-include::postgres.asciidoc[leveloffset=+1]
 
 == Full Example
 

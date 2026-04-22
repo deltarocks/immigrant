@@ -1,0 +1,27 @@
+
+= Diesel
+:order: 0
+:draft:
+
+Immigrant can generate Diesel schema definitions and derive macros for your Rust projects.
+
+== Setup
+
+TODO
+
+== Annotations
+
+Use `#diesel(...)` annotations to control code generation:
+
+[source,immigrant]
+----
+#diesel(type="dt::Text",copy,custom)
+scalar user_id = sql"TEXT";
+
+#diesel(derive = "async_graphql::Enum")
+enum client_kind { confidential; public; };
+----
+
+== Generated Code
+
+TODO

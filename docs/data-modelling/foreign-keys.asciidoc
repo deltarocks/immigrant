@@ -1,5 +1,6 @@
 
 = Foreign Keys
+:order: 3
 
 == Inline (column-level)
 

@@ -1,0 +1,14 @@
+
+= DMDL
+:order: 1
+:draft:
+
+DMDL (Data Model Definition Language) integration allows immigrant schemas to be exported in DMDL format for documentation and visualization tools.
+
+== Overview
+
+TODO
+
+== Usage
+
+TODO
