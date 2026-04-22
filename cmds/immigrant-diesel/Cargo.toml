@@ -7,7 +7,7 @@ description = "Immigrant diesel ORM codegen"
 
 [dependencies]
 clap.workspace = true
-schema.workspace = true
+schema = { workspace = true, features = ["tree-sitter-highlight"] }
 cli.workspace = true
 file-diffs.workspace = true
 anyhow.workspace = true
@@ -15,6 +15,10 @@ quote = "1.0.43"
 syn = "2.0.114"
 proc-macro2 = "1.0.105"
 prettyplease = "0.2.37"
-rust-format = { version = "0.3.4", features = ["token_stream", "post_process", "pretty_please"] }
+rust-format = { version = "0.3.4", features = [
+	"token_stream",
+	"post_process",
+	"pretty_please",
+] }
 Inflector.workspace = true
 hi-doc.workspace = true
