@@ -1,0 +1,133 @@
+
+= PostgreSQL
+
+== Naming Conventions
+
+By default, immigrant transforms code names for PostgreSQL:
+
+* *Tables and views:* `snake_case` + pluralize. `UserProfile` becomes `user_profiles`, `User` becomes `users`.
+* *Columns:* used as-is from schema.
+* *Scalars/domains:* used as-is from schema.
+
+Override with explicit database name:
+
+[source,immigrant]
+----
+table UserProfile "user_profiles" { ... };
+----
+
+Or disable transformation entirely with `#pgnc(as_is)`:
+
+[source,immigrant]
+----
+#pgnc(as_is)
+table my_table { ... };
+/// Database name is 'my_table', not 'my_tables'
+----
+
+=== Auto-generated Constraint Names
+
+When no explicit name is given, immigrant generates names following PostgreSQL conventions:
+
+[cols="1,2"]
+|===
+|Constraint |Pattern
+
+|Primary key
+|`{table}_pkey`
+
+|Unique
+|`{table}_{columns}_key`
+
+|Index (non-unique)
+|`{table}_{columns}_idx`
+
+|Index (unique)
+|`{table}_{columns}_key`
+
+|Check
+|`{table}_{columns}_check`
+|===
+
+Names longer than 63 characters are truncated with a hash suffix.
+
+== Comments
+
+`//` doc comments before items produce `COMMENT ON` statements:
+
+[source,immigrant]
+----
+// User accounts
+table User {
+    // Unique identifier
+    user_id @primary_key;
+};
+----
+
+Generates:
+
+[source,sql]
+----
+COMMENT ON TABLE users IS 'User accounts';
+COMMENT ON COLUMN users.user_id IS 'Unique identifier';
+----
+
+`///` comments are ignored by immigrant entirely.
+
+== Type Mapping
+
+[cols="1,2"]
+|===
+|Schema item |PostgreSQL object
+
+|Scalar (non-inline)
+|`CREATE DOMAIN`
+
+|Scalar (`@inline`)
+|No object — type expanded at point of use
+
+|Enum
+|`CREATE TYPE ... AS ENUM`
+
+|Struct
+|`CREATE TYPE ... AS` (composite type)
+
+|Table
+|`CREATE TABLE`
+
+|View
+|`CREATE VIEW`
+
+|Materialized view
+|`CREATE MATERIALIZED VIEW`
+|===
+
+== View Management
+
+PostgreSQL does not support in-place modification of view definitions. When a view needs to change, immigrant DROPs and reCREATEs it.
+
+A view needs rebuilding when any of its dependencies change. PostgreSQL expands `SELECT *` at view creation time, so renaming a column in a referenced table leaves the view producing stale column names. Immigrant detects this by fingerprinting each view's SQL, referenced column names/types, and referenced view definitions (recursively).
+
+When rebuilding is needed:
+
+1. Affected views are renamed to temporary names
+2. Table/column changes are applied
+3. Temporary views are dropped
+4. Views are recreated with updated references
+
+Views are topologically sorted to respect dependencies — a view referencing another view is dropped first and created last. Materialized views are handled the same way.
+
+== Migration Stages
+
+Immigrant generates migrations in ordered stages to maintain referential integrity:
+
+1. Drop old foreign keys, rename columns
+2. Drop indexes, add/alter columns, add/update non-FK constraints, recreate indexes
+3. Drop removed columns, update comments
+4. Drop affected views (dependency order)
+5. Create/recreate views (dependency order)
+6. Create new foreign keys
+
+Column type changes use `ALTER COLUMN SET DATA TYPE ... USING` with the `@initialize_as` expression when provided.
+
+Enum variant additions use `ALTER TYPE ... ADD VALUE`. Removing a variant requires recreating the type (PostgreSQL limitation).

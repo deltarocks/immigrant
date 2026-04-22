@@ -10,16 +10,14 @@ table User "users" {
 };
 ----
 
-Inside a table block, you declare:
+Inside a table block:
 
 1. Columns (with optional type, nullability, attributes, foreign keys)
-2. Table-level attributes (`@primary_key`, `@unique`, `@check`, `@index`)
+2. Table-level constraints (`@primary_key`, `@unique`, `@check`, `@index`)
 3. Standalone foreign keys
 4. Mixin inclusions
 
 == Columns
-
-Basic column syntax:
 
 [source,immigrant]
 ----
@@ -28,48 +26,264 @@ table Example {
 };
 ----
 
-Type can be omitted. Immigrant resolves it from a scalar/enum/struct with the same name as the column:
+Type can be omitted. Immigrant resolves it from a scalar/enum/struct with the same name:
 
 [source,immigrant]
 ----
-scalar user_id = sql"INTEGER";
-table User {
-    user_id;          /// type is 'user_id' (resolved by name)
-    name: sql"TEXT";  /// explicit inline type
-    bio: sql"TEXT"?;  /// nullable, inline type
-    role: user_role;  /// explicit type reference
+scalar user_id = sql"TEXT";
+enum challenge_kind { password; gpg; totp; };
+
+table UserChallenge {
+    /// resolved to scalar user_id
+    user_id;
+    /// resolved to enum challenge_kind
+    challenge_kind;
+    /// explicit inline type
+    name: sql"TEXT";
+    /// explicit inline type
+    check_data: sql"BYTEA";
 };
 ----
 
 === Nullability
 
-Append `?` to make a column nullable. Without it, columns are `NOT NULL`:
+Append `?` for nullable. Without it, columns are `NOT NULL`:
 
 [source,immigrant]
 ----
-table Example {
-    name: sql"TEXT";   /// NOT NULL
-    bio: sql"TEXT"?;   /// nullable
-    picture?;          /// nullable, type resolved by name
+table Profile {
+    user_id @primary_key;
+    /// nullable, type resolved by name
+    name?;
+    /// nullable, explicit type
+    picture: sql"TEXT"?;
 };
 ----
 
 === Inline SQL types
 
-Instead of referencing a scalar, you can write the SQL type directly:
+Write SQL type directly instead of referencing a scalar:
 
 [source,immigrant]
 ----
 table Example {
-    field: sql"TEXT";
-    field: sql"INTEGER[]";
-    field: sql"{some_scalar}[]";  /// reference another type inside inline SQL
+    data: sql"BYTEA";
+    tags: sql"TEXT[]";
+    /// reference another type inside inline SQL
+    scores: sql"{score_type}[]";
+};
+----
+
+== Column Attributes
+
+=== @primary_key
+
+[source,immigrant]
+----
+table User {
+    user_id @primary_key;
+};
+----
+
+Multiple columns with `@primary_key` merge into one composite primary key:
+
+[source,immigrant]
+----
+table SessionIdentity {
+    session_id @primary_key;
+    user_id @primary_key;
+    /// produces PRIMARY KEY(session_id, user_id)
+};
+----
+
+A column can also list additional columns to include in the primary key:
+
+[source,immigrant]
+----
+table AudienceScope {
+    scope_id @primary_key(audience_id);
+    audience_id @index;
+    /// produces PRIMARY KEY(scope_id, audience_id)
+};
+----
+
+Named primary key:
+
+[source,immigrant]
+----
+table SessionIdentity {
+    session_id @primary_key "session_identity_pkey";
+};
+----
+
+=== @unique
+
+[source,immigrant]
+----
+table RefreshToken {
+    refresh_token_base @primary_key;
+    access_token @unique;
+};
+----
+
+=== @check
+
+CHECK constraint using the link:expressions.asciidoc[expression language]. `_` is placeholder for column value:
+
+[source,immigrant]
+----
+table Example {
+    age: sql"INTEGER" @check(_ >= 0);
+    name: sql"TEXT" @check(char_length(_) > 0);
+    code: sql"TEXT" @check "valid_code" (LEFT(_, 1) == 'U' && char_length(_) == 33);
+};
+----
+
+=== @default
+
+Sets column default using the link:expressions.asciidoc[expression language]:
+
+[source,immigrant]
+----
+table Client {
+    created_at: sql"TIMESTAMPTZ" @default(NOW());
+    active: sql"BOOLEAN" @default(true);
+    expires_in: sql"INTEGER" @default(7200);
+};
+----
+
+=== @initialize_as
+
+Like `@default`, but for populating columns at creation time. Can reference other columns and use link:expressions.asciidoc[expression language] casts:
+
+[source,immigrant]
+----
+table UserBuiltinConsent {
+    scope_id: builtin_scope @initialize_as(scope_id::builtin_scope);
+    public: bool @initialize_as(false);
+};
+----
+
+=== @index
+
+[source,immigrant]
+----
+table UsernameHistory {
+    user_id @index;
+    user_id @index "custom_index_name";
+};
+----
+
+Index options for specialized indexes:
+
+[source,immigrant]
+----
+table Example {
+    embedding @index.opclass(vector_cosine_ops);
+    embedding @index.using(ivfflat);
+    embedding @index.unique;
+    embedding @index.with("lists = 100");
+
+    /// all options combined
+    embedding @index.opclass(vector_cosine_ops).using(ivfflat).with("options = \"..settings..\"");
+};
+----
+
+Named indexes merge columns into one index:
+
+[source,immigrant]
+----
+table Example {
+    a: sql"INTEGER" @index "composite_idx";
+    b: sql"INTEGER" @index "composite_idx";
+    /// produces CREATE INDEX composite_idx ON example(a, b)
+};
+----
+
+== Table-Level Constraints
+
+For composite constraints or referencing multiple columns:
+
+[source,immigrant]
+----
+table UserChallenge {
+    user_id;
+    challenge_kind;
+    check_data: sql"BYTEA";
+    search_key: sql"BYTEA"?;
+    keybase_material_sort_key: sql"INTEGER"?;
+
+    @primary_key(user_id, challenge_kind, check_data);
+    @unique(challenge_kind, search_key);
+    @unique(user_id, keybase_material_sort_key);
+};
+----
+
+Named constraints:
+
+[source,immigrant]
+----
+table AuthorizationCodeAudience {
+    authorization_code;
+    audience_id;
+    @primary_key "oauth_authorization_code_audiences_pk" (audience_id, authorization_code);
+};
+----
+
+Table-level `@check` references columns by name (no `_` placeholder):
+
+[source,immigrant]
+----
+table Example {
+    lo: sql"INTEGER";
+    hi: sql"INTEGER";
+    @check "valid_range" (lo <= hi);
+};
+----
+
+Table-level `@index`:
+
+[source,immigrant]
+----
+table Example {
+    user_id: sql"TEXT";
+    email: sql"TEXT";
+    @index(user_id, email);
+    @index.unique(user_id, email);
+};
+----
+
+=== Constraint Merging
+
+All primary keys merge into one. Checks with the same name merge with AND:
+
+[source,immigrant]
+----
+scalar test = sql"TEXT" @inline @check "testcheck" (_ != '1');
+
+table Foo {
+    test @check "testcheck" (_ != '2');
+    /// produces CHECK (test <> '1' AND test <> '2')
+};
+----
+
+Named `@unique` and `@index` also merge their columns.
+
+== @external
+
+Prevents immigrant from generating CREATE/DROP TABLE. For tables managed outside immigrant:
+
+[source,immigrant]
+----
+table External {
+    id: sql"INTEGER";
+    @external;
 };
 ----
 
 == Mixins
 
-Mixins are reusable groups of columns, attributes, and foreign keys that can be included in multiple tables:
+Reusable groups of columns, attributes, and foreign keys:
 
 [source,immigrant]
 ----

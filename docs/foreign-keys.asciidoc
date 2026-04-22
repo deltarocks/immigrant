@@ -8,17 +8,31 @@ Append `~` after column definition to declare a foreign key:
 [source,immigrant]
 ----
 table Post {
-    /// References User table, target column resolved by name (user_id)
+    /// target column resolved by name
     user_id ~ User;
-
-    /// Explicit target column
+    /// explicit target column
     user_id ~ User(id);
-
-    /// With ON DELETE action
+    /// with ON DELETE action
     user_id ~.cascade User;
-
-    /// Named foreign key
+    /// named foreign key
     user_id "fk_author" ~.cascade User;
+};
+----
+
+Foreign keys combine with other column attributes:
+
+[source,immigrant]
+----
+table Profile {
+    // Primary key that also references User with cascade delete
+    user_id @primary_key ~.cascade User;
+};
+
+table ClientRedirectUrl {
+    // Indexed foreign key
+    client_id @index ~.cascade Client;
+    redirect_url: sql"TEXT";
+    @primary_key(client_id, redirect_url);
 };
 ----
 

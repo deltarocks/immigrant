@@ -49,14 +49,13 @@ Renaming the database name in schema triggers `ALTER ... RENAME` in migration. I
 
 === Comments
 
+`//` comments before items become SQL `COMMENT ON` statements (see link:postgres.asciidoc[PostgreSQL]). `///` comments produce no SQL output.
+
 [source,immigrant]
 ----
-// Doc comment, translated to COMMENT ON in PostgreSQL
+// Doc comment, becomes COMMENT ON
 /// Ignored by parser, for schema authors only
 ----
-
-`//` comments before items become `COMMENT ON` statements in SQL.
-`///` comments produce no SQL output.
 
 == Items
 
@@ -71,17 +70,55 @@ scalar positive_int = sql"INTEGER" @check(_ > 0);
 scalar created_at = sql"TIMESTAMPTZ" @default(NOW());
 ----
 
-Attributes on scalars propagate to every column that uses them.
-If every `user_id` column should be indexed, declare it on the scalar:
+==== @check / @default
+
+CHECK constraints and defaults on the domain. `_` is placeholder for the value. Both use the link:expressions.asciidoc[expression language], not raw SQL:
+
+[source,immigrant]
+----
+scalar positive_int = sql"INTEGER" @check(_ > 0);
+scalar bounded = sql"INTEGER" @check "named" (_ > 0 && _ < 1000);
+scalar created_at = sql"TIMESTAMPTZ" @default(NOW());
+----
+
+==== @primary_key / @unique / @index
+
+Propagate to every column using this scalar:
 
 [source,immigrant]
 ----
 scalar user_id = sql"INTEGER" @index;
+scalar email = sql"TEXT" @unique;
 ----
 
-Now every column of type `user_id` gets an index automatically.
+Every column of type `user_id` gets an index, every `email` column gets a unique constraint.
 
-See also: `@inline` and `@external` in link:attributes.asciidoc[Attributes].
+==== @inline
+
+Skips domain creation. Raw SQL type and constraints expand at point of use:
+
+[source,immigrant]
+----
+scalar non_zero_int = sql"INTEGER" @check(_ != 0) @inline;
+----
+
+Columns using `non_zero_int` get type `INTEGER` with CHECK directly on the table. No domain.
+
+==== @external
+
+Prevents immigrant from generating CREATE/DROP DOMAIN. For types managed outside immigrant:
+
+[source,immigrant]
+----
+scalar existing_type = sql"TEXT" @external;
+----
+
+==== Propagation
+
+Scalar attributes propagate to columns using the scalar:
+
+* `@primary_key`, `@unique`, `@index` — always propagate, regardless of inline.
+* `@default`, `@check` — propagate only when scalar is `@inline`. Otherwise stay on the domain.
 
 === Enums
 
@@ -124,7 +161,8 @@ struct address {
 
 table Customer {
     id: sql"INTEGER" @primary_key;
-    address;  /// column type is 'address' composite
+    /// column type is 'address' composite
+    address;
 };
 ----
 
@@ -158,19 +196,22 @@ enum client_kind { ... };
 
 Annotations can be placed before any item (scalar, enum, struct, table) or before individual columns and enum variants.
 
-include::attributes.asciidoc[leveloffset=+1]
-
 include::foreign-keys.asciidoc[leveloffset=+1]
 
 include::expressions.asciidoc[leveloffset=+1]
+
+include::postgres.asciidoc[leveloffset=+1]
 
 == Full Example
 
 [source,immigrant]
 ----
-/// Scalars define reusable types with baked-in constraints
 scalar user_id = sql"TEXT" @check(LEFT(_, 1) == 'U' && char_length(_) == 33);
+scalar client_id = sql"TEXT" @check(LEFT(_, 1) == 'C' && char_length(_) == 33);
+scalar scope_id = sql"TEXT" @check(!(_ ~~ '% %'));
 scalar created_at = sql"TIMESTAMPTZ" @default(NOW());
+scalar updated_at = sql"TIMESTAMPTZ" @default(NOW());
+scalar expires_in = sql"INTEGER" @check(_ > 0);
 scalar name = sql"TEXT";
 scalar bool = sql"BOOLEAN" @inline;
 
@@ -178,6 +219,21 @@ enum challenge_kind {
     password;
     gpg;
     totp;
+};
+
+enum client_kind {
+    confidential;
+    public;
+};
+
+struct pkce_challenge_data {
+    method: sql"TEXT";
+    challenge: sql"TEXT";
+};
+
+@mixin Timestamps {
+    created_at;
+    updated_at;
 };
 
 table User {
@@ -190,7 +246,7 @@ table Profile {
     user_id @primary_key ~.cascade User;
     name?;
     picture: sql"TEXT"?;
-    updated_at: sql"TIMESTAMPTZ" @default(NOW());
+    updated_at;
 };
 
 table UserChallenge {
@@ -201,6 +257,44 @@ table UserChallenge {
 
     @primary_key(user_id, challenge_kind, check_data);
     @unique(challenge_kind, search_key);
+};
+
+table Client {
+    client_id @primary_key;
+    name;
+    client_kind;
+    uses_client_secret: bool;
+    uses_pkce: bool;
+    created_at;
+};
+
+table ClientRedirectUrl {
+    client_id @index ~.cascade Client;
+    redirect_url: sql"TEXT";
+    public: bool @initialize_as(false);
+
+    @primary_key(client_id, redirect_url);
+};
+
+table Audience {
+    scope_id @primary_key(audience_id);
+    audience_id: sql"TEXT" @index;
+    name;
+};
+
+table AudienceScope {
+    audience_id ~.cascade Audience;
+    scope_id;
+    @primary_key(audience_id, scope_id);
+};
+
+table ClientAllowedScope {
+    client_id ~.cascade Client;
+    audience_id ~.cascade Audience;
+    scope_id;
+
+    @primary_key(client_id, audience_id, scope_id);
+    (audience_id, scope_id) ~.cascade AudienceScope;
 };
 
 view ActiveUsers = sql"""

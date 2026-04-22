@@ -52,19 +52,28 @@ Used in `@check`, `@default`, and `@initialize_as`. This is not raw SQL. Immigra
 ----
 table Example {
     a: sql"INTEGER"
-        @check(_ > 0)                     /// placeholder for current value
-        @check(_ != null)                  /// null literal
-        @check(_ == true)                  /// boolean literal
-        @check(_ != 'forbidden')           /// string literal
-        @check(_ != 42)                    /// numeric literal
-        @check(char_length(_) > 0)         /// function call
-        @check(_ :: sql"BIGINT" > 0)       /// cast
-        @check(if _ > 10 then true else false) /// conditional (CASE WHEN ... THEN ... ELSE ... END)
+        /// placeholder for current value
+        @check(_ > 0)
+        /// null literal
+        @check(_ != null)
+        /// boolean literal
+        @check(_ == true)
+        /// string literal
+        @check(_ != 'forbidden')
+        /// numeric literal
+        @check(_ != 42)
+        /// function call
+        @check(char_length(_) > 0)
+        /// cast
+        @check(_ :: sql"BIGINT" > 0)
+        /// conditional (CASE WHEN ... THEN ... ELSE ... END)
+        @check(if _ > 10 then true else false)
     ;
 };
 
+/// field access on composites
 struct example {
     a: sql"INTEGER";
-    @check(_.a > 0);                       /// field access on composites
+    @check(_.a > 0);
 };
 ----
