@@ -590,26 +590,67 @@ fn generate_schema(schema: Schema, report: &mut Report, rn: &RenameMap) -> anyho
 		}
 	}
 
-	for table in schema.tables() {
-		let table = SchemaTable {
-			schema: &schema,
-			table,
-		};
-		let a = table_mod_ident(&table);
-		for fk in table.foreign_keys() {
-			// Both should be equal
-			if fk.source_columns().len() != 1 || fk.target_columns().len() != 1 {
-				continue;
+	{
+		let mut joinable_counts = std::collections::HashMap::<(String, String), usize>::new();
+		for table in schema.tables() {
+			let table = SchemaTable {
+				schema: &schema,
+				table,
+			};
+			for fk in table.foreign_keys() {
+				if fk.source_columns().len() != 1 || fk.target_columns().len() != 1 {
+					continue;
+				}
+				let target_table = fk.target_table();
+				if table.id() == target_table.id() {
+					continue;
+				}
+				let target = fk.target_columns()[0];
+				let target_column = target_table.schema_column(target);
+				if !target_column.is_pk_full() {
+					continue;
+				}
+				let key = (
+					table.id().name().to_string(),
+					target_table.id().name().to_string(),
+				);
+				*joinable_counts.entry(key).or_default() += 1;
 			}
-			let target = fk.target_columns()[0];
-			let target_table = fk.target_table();
-			let target_column = target_table.schema_column(target);
-			if !target_column.is_pk_full() {
-				continue;
+		}
+		// joinable! should only be used for unambiguous (single FK) pairs
+		// Otherwise use TABLE_via_FK method, or specify join condition manually
+		for table in schema.tables() {
+			let table = SchemaTable {
+				schema: &schema,
+				table,
+			};
+			let a = table_mod_ident(&table);
+			for fk in table.foreign_keys() {
+				if fk.source_columns().len() != 1 || fk.target_columns().len() != 1 {
+					continue;
+				}
+				let target_table = fk.target_table();
+				if table.id() == target_table.id() {
+					continue;
+				}
+				let target = fk.target_columns()[0];
+				let target_column = target_table.schema_column(target);
+				if !target_column.is_pk_full() {
+					continue;
+				}
+				let key = (
+					table.id().name().to_string(),
+					target_table.id().name().to_string(),
+				);
+				if joinable_counts[&key] > 1 {
+					continue;
+				}
+				let b = table_mod_ident(&target_table);
+				let source = fk.source_columns()[0];
+				let source_column = table.schema_column(source);
+				let column = column_ident(&source_column);
+				out.append_all(quote!(diesel::prelude::joinable!(#a -> #b (#column));));
 			}
-			let b = table_mod_ident(&target_table);
-			let column = column_ident(&target_column);
-			out.append_all(quote!(diesel::prelude::joinable!(#a -> #b (#column));));
 		}
 	}
 
@@ -746,6 +787,24 @@ fn generate_schema(schema: Schema, report: &mut Report, rn: &RenameMap) -> anyho
 					});
 				}
 
+				let mut name_counts = std::collections::HashMap::<String, usize>::new();
+				for source_table in schema.tables() {
+					if source_table.id() == table.id() {
+						continue;
+					}
+					let source_table = SchemaTable {
+						schema: &schema,
+						table: source_table,
+					};
+					for fk in source_table.foreign_keys() {
+						if fk.target_table().id() != table.id() {
+							continue;
+						}
+						let many = fk.cardinality().0 == Cardinality::Many;
+						let base_name = fk_method_ident(&source_table, many).to_string();
+						*name_counts.entry(base_name).or_default() += 1;
+					}
+				}
 				for source_table in schema.tables() {
 					if source_table.id() == table.id() {
 						continue;
@@ -760,18 +819,17 @@ fn generate_schema(schema: Schema, report: &mut Report, rn: &RenameMap) -> anyho
 						}
 
 						let many = fk.cardinality().0 == Cardinality::Many;
-						let method_name = fk_method_ident(&source_table, many);
-						// format_where(t);
+						let base_name = fk_method_ident(&source_table, many).to_string();
+						// _via_{source_column} disambiguation on conflict
+						let method_name =
+							if name_counts[&base_name] > 1 && fk.source_columns().len() == 1 {
+								let src_col = to_snake_case(&fk.source_columns()[0].name());
+								format_ident!("{base_name}_via_{src_col}")
+							} else {
+								format_ident!("{base_name}")
+							};
 						let table_name = table_mod_ident(&source_table);
-						// super::username_histories::table
-						// 	.select(UsernameHistory::as_select())
-						// 	.filter(
-						// 		super::username_histories::dsl::user_id.eq(&self.user_id),
-						// 	)
-						// 	.load(db)
-						// 	.await;
 						let struct_ident = table_struct_ident(&source_table);
-						// for (a, b) in
 						let filters = fk
 							.source_columns()
 							.into_iter()
@@ -783,7 +841,6 @@ fn generate_schema(schema: Schema, report: &mut Report, rn: &RenameMap) -> anyho
 								let b = column_ident(&b);
 								quote!(.filter(dsl::#a.eq(&self.#b)))
 							});
-						// }
 						let load = if many {
 							quote!(.load(db))
 						} else {
