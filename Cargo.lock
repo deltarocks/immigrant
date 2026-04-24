@@ -775,7 +775,7 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 
 [[package]]
 name = "immigrant"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "Inflector",
  "anyhow",
@@ -796,7 +796,7 @@ dependencies = [
 
 [[package]]
 name = "immigrant-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "hi-doc",
@@ -808,7 +808,7 @@ dependencies = [
 
 [[package]]
 name = "immigrant-diesel"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "Inflector",
  "anyhow",
@@ -826,7 +826,7 @@ dependencies = [
 
 [[package]]
 name = "immigrant-dmdl"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -838,7 +838,7 @@ dependencies = [
 
 [[package]]
 name = "immigrant-file-diffs"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "immigrant-imara-diff",
  "ouroboros",
@@ -849,7 +849,7 @@ dependencies = [
 
 [[package]]
 name = "immigrant-generator-postgres"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "blake2",
  "immigrant-schema",
@@ -873,7 +873,7 @@ dependencies = [
 
 [[package]]
 name = "immigrant-migrate"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -890,7 +890,7 @@ dependencies = [
 
 [[package]]
 name = "immigrant-schema"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "Inflector",
  "base32",
@@ -910,7 +910,7 @@ dependencies = [
 
 [[package]]
 name = "immigrant-web"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "console_error_panic_hook",
  "getrandom 0.3.4",
