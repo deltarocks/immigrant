@@ -3,6 +3,8 @@ name = "immigrant-dmdl"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = "Immigrant DMDL codegen"
 
 [dependencies]

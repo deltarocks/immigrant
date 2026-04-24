@@ -3,6 +3,8 @@ name = "immigrant-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = "Immigrant shared CLI helpers"
 
 [dependencies]

@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 build = "build.rs"
 license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = "Immigrant migrations generator for postgres SQL dialect"
 
 [dependencies]

@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 default-run = "immigrant"
 license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = "Immigrant schema definition language - CLI"
 
 [dependencies]

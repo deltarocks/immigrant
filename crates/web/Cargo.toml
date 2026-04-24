@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 publish = false
 license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = "Immigrant core JS bindings"
 
 [lib]
