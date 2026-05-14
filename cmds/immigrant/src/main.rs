@@ -227,17 +227,16 @@ fn main() -> anyhow::Result<()> {
 				// }
 			}
 
-			let mut dir = root;
-			dir.push(&id.dirname);
-
-			fs::create_dir(&dir).context("creating migration directory")?;
-
 			migration.to_diff(original_str.clone())?;
 
 			if migration.is_noop() {
 				println!("No changes found");
 				return Ok(());
 			}
+
+			let mut dir = root;
+			dir.push(&id.dirname);
+			fs::create_dir(&dir).context("creating migration directory")?;
 
 			{
 				let mut schema_update = dir.to_owned();
