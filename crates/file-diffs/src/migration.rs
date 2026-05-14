@@ -84,7 +84,9 @@ impl Migration {
 		if old_schema.trim().is_empty() {
 			return Ok(());
 		}
-		let diff_input = InternedInput::new(old_schema.as_str(), reset.as_str());
+		let old = format!("{}\n", old_schema.as_str().trim_end());
+		let new = format!("{}\n", reset.as_str().trim_end());
+		let diff_input = InternedInput::new(old.as_str(), new.as_str());
 		let mut diff = Diff::compute(Algorithm::Histogram, &diff_input);
 		diff.postprocess_lines(&diff_input);
 		let update = diff
@@ -163,7 +165,9 @@ impl FromStr for Migration {
 		} else {
 			"".to_owned()
 		};
-		if let Some(line) = lines.next() {
+		if let Some(line) = lines.next()
+			&& !line.is_empty()
+		{
 			return Err(UnexpectedHeader(line.to_owned()));
 		}
 
