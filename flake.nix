@@ -1,7 +1,7 @@
 {
   description = "Immigrant: Database schema description language";
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/release-25.11";
+    nixpkgs.url = "github:nixos/nixpkgs/release-26.05";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -48,59 +48,65 @@
             inherit system;
             overlays = [ rust-overlay.overlays.default ];
           };
-          packages = let
-            root = ./.;
-            src = lib.fileset.toSource {
-              inherit root;
-              fileset = lib.fileset.unions [
-                (craneLib.fileset.commonCargoSources root)
-                (lib.fileset.fileFilter (file: file.hasExt "schema") root)
-              ];
-            };
-          in {
-            default = packages.immigrant;
-            immigrant = craneLib.buildPackage {
-              pname = "immigrant";
-              inherit src;
-              strictDeps = true;
-              nativeBuildInputs = sharedDeps;
-            };
-            immigrant-web = let
-              craneLibWasm = craneLib.overrideToolchain (rust.override {
-                targets = [ "wasm32-unknown-unknown" ];
-              });
-              cargoArtifacts = craneLibWasm.buildDepsOnly {
+          packages =
+            let
+              root = ./.;
+              src = lib.fileset.toSource {
+                inherit root;
+                fileset = lib.fileset.unions [
+                  (craneLib.fileset.commonCargoSources root)
+                  (lib.fileset.fileFilter (file: file.hasExt "schema") root)
+                ];
+              };
+            in
+            {
+              default = packages.immigrant;
+              immigrant = craneLib.buildPackage {
+                pname = "immigrant";
                 inherit src;
-                pname = "immigrant-web-deps";
-                doCheck = false;
-                cargoExtraArgs = "--lib -p immigrant-web --target wasm32-unknown-unknown";
+                strictDeps = true;
                 nativeBuildInputs = sharedDeps;
               };
-              wasmLib = craneLibWasm.buildPackage {
-                inherit src cargoArtifacts;
-                pname = "immigrant-web";
-                doCheck = false;
-                cargoExtraArgs = "--lib -p immigrant-web --target wasm32-unknown-unknown";
-                nativeBuildInputs = sharedDeps;
-                installPhaseCommand = ''
-                  mkdir -p $out/lib
-                  cp target/wasm32-unknown-unknown/release/immigrant_web.wasm $out/lib/
-                '';
-              };
-            in pkgs.stdenv.mkDerivation {
-              pname = "immigrant-web";
-              version = "0.2.0";
-              dontUnpack = true;
-              nativeBuildInputs = [ pkgs.wasm-bindgen-cli ];
-              buildPhase = ''
-                wasm-bindgen ${wasmLib}/lib/immigrant_web.wasm \
-                  --out-dir $out \
-                  --target web \
-                  --out-name web
-              '';
-              installPhase = "true";
+              immigrant-web =
+                let
+                  craneLibWasm = craneLib.overrideToolchain (
+                    rust.override {
+                      targets = [ "wasm32-unknown-unknown" ];
+                    }
+                  );
+                  cargoArtifacts = craneLibWasm.buildDepsOnly {
+                    inherit src;
+                    pname = "immigrant-web-deps";
+                    doCheck = false;
+                    cargoExtraArgs = "--lib -p immigrant-web --target wasm32-unknown-unknown";
+                    nativeBuildInputs = sharedDeps;
+                  };
+                  wasmLib = craneLibWasm.buildPackage {
+                    inherit src cargoArtifacts;
+                    pname = "immigrant-web";
+                    doCheck = false;
+                    cargoExtraArgs = "--lib -p immigrant-web --target wasm32-unknown-unknown";
+                    nativeBuildInputs = sharedDeps;
+                    installPhaseCommand = ''
+                      mkdir -p $out/lib
+                      cp target/wasm32-unknown-unknown/release/immigrant_web.wasm $out/lib/
+                    '';
+                  };
+                in
+                pkgs.stdenv.mkDerivation {
+                  pname = "immigrant-web";
+                  version = "0.2.0";
+                  dontUnpack = true;
+                  nativeBuildInputs = [ pkgs.wasm-bindgen-cli ];
+                  buildPhase = ''
+                    wasm-bindgen ${wasmLib}/lib/immigrant_web.wasm \
+                      --out-dir $out \
+                      --target web \
+                      --out-name web
+                  '';
+                  installPhase = "true";
+                };
             };
-          };
           shelly.shells.default = {
             factory = craneLib.devShell;
             packages =
