@@ -123,12 +123,12 @@ pub fn mk_change_list<T: RenameExt + Clone + Copy + Debug, V: IsCompatible + IsI
 				&& f.db(rn) == old.db(rn)
 		});
 		if let Some((nid, new)) = new_by_exact.next() {
-			{
-				let other = new_by_exact.next();
-				assert!(
-					other.is_none(),
-					"second exact match shouldn't be possible: {nid} {new:?} {other:?}"
-				);
+			if new_by_exact.next().is_some() {
+				report_new.error(format!(
+					"ambiguous match for '{}': duplicate items prevent diffing",
+					old.db(rn).raw()
+				));
+				continue;
 			}
 			old_listed.insert(oid);
 			new_listed.insert(nid);
@@ -145,7 +145,13 @@ pub fn mk_change_list<T: RenameExt + Clone + Copy + Debug, V: IsCompatible + IsI
 				&& !new_listed.contains(i)
 		});
 		if let Some((nid, new)) = new_by_code.next() {
-			assert!(new_by_code.next().is_none());
+			if new_by_code.next().is_some() {
+				report_new.error(format!(
+					"ambiguous match for '{}': duplicate items prevent diffing",
+					old.db(rn).raw()
+				));
+				continue;
+			}
 			old_listed.insert(oid);
 			new_listed.insert(nid);
 			out.updated.push(Diff { old, new });
@@ -166,7 +172,13 @@ pub fn mk_change_list<T: RenameExt + Clone + Copy + Debug, V: IsCompatible + IsI
 			.enumerate()
 			.filter(|(i, f)| f.db(rn) == old.db(rn) && !new_listed.contains(i));
 		if let Some((nid, new)) = new_by_db.next() {
-			assert!(new_by_db.next().is_none());
+			if new_by_db.next().is_some() {
+				report_new.error(format!(
+					"ambiguous match for '{}': duplicate items prevent diffing",
+					old.db(rn).raw()
+				));
+				continue;
+			}
 			old_listed.insert(oid);
 			new_listed.insert(nid);
 			out.updated.push(Diff { old, new });
