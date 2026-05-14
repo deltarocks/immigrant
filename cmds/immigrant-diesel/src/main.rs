@@ -682,6 +682,23 @@ fn generate_schema(schema: Schema, report: &mut Report, rn: &RenameMap) -> anyho
 				}
 			};
 
+			let extra_attrs = if kind == TableKind::Load {
+				table
+					.annotations
+					.get_multi::<String>("rust", "attr")
+					.expect("diesel attribute")
+					.into_iter()
+					.map(|v| {
+						let body: TokenStream = v
+							.parse()
+							.expect("rust attribute body must be valid Rust tokens");
+						quote!(#[#body])
+					})
+					.collect::<Vec<_>>()
+			} else {
+				Vec::new()
+			};
+
 			let pk = table
 				.columns()
 				.filter(TableColumn::is_pk_part)
@@ -874,6 +891,7 @@ fn generate_schema(schema: Schema, report: &mut Report, rn: &RenameMap) -> anyho
 			} else {
 				orm.append_all(quote! {
 					#derive_attr
+					#(#extra_attrs)*
 					#diesel_attr
 					pub struct #struct_ident #struct_lifetime {
 						#(#columns,)*
