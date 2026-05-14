@@ -175,8 +175,14 @@ pub fn generate_sql(
 pub fn display_reports(a: &str, b: &str, ar: Report, br: Report) -> bool {
 	if ar.is_error() || br.is_error() {
 		eprintln!("schema diffing ended with failure:");
+		for msg in ar.plain_errors() {
+			eprintln!("error: {msg}");
+		}
 		for s in ar.to_hi_doc(a) {
 			eprint!("{}", hi_doc::source_to_ansi(&s));
+		}
+		for msg in br.plain_errors() {
+			eprintln!("error: {msg}");
 		}
 		for s in br.to_hi_doc(b) {
 			eprint!("{}", hi_doc::source_to_ansi(&s));

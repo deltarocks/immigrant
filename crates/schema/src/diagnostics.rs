@@ -65,6 +65,7 @@ impl Report {
 			let mut builder = SnippetBuilder::new(&snippet_src);
 			#[cfg(feature = "tree-sitter-highlight")]
 			highlight(&mut builder);
+
 			// TODO: other severity
 			for ele in part.annotations {
 				let mut ann = builder.error(Text::fragment(
@@ -85,6 +86,13 @@ impl Report {
 	}
 	pub fn is_error(&self) -> bool {
 		self.parts.iter().any(|p| p.severity == Severity::Error)
+	}
+	pub fn plain_errors(&self) -> Vec<&str> {
+		self.parts
+			.iter()
+			.filter(|p| p.severity == Severity::Error && p.annotations.is_empty())
+			.map(|p| p.msg.as_str())
+			.collect()
 	}
 
 	pub fn error(&mut self, msg: impl AsRef<str>) -> PartBuilder<'_> {
