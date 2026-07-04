@@ -14,6 +14,7 @@ use crate::{
 	diagnostics::Report,
 	ids::{DbIdent, Ident},
 	index::{Check, Index, PrimaryKey, UniqueConstraint},
+	role::Role,
 	root::{Item, Schema},
 	scalar::{Enum, Scalar, ScalarAttribute},
 	sql::Sql,
@@ -86,6 +87,10 @@ impl Pgnc<&mut Schema> {
 				Item::View(v) => {
 					let c = Pgnc(v);
 					c.generate_name(rn);
+				}
+				Item::Role(r) => {
+					let r = Pgnc(r);
+					r.generate_name(rn);
 				}
 				Item::Mixin(_) => unreachable!("mixins are assimilated"),
 			}
@@ -353,6 +358,14 @@ impl Pgnc<&mut Table> {
 					}
 					decided_names.push(Some(truncate_auto_name(out, "pkey")));
 				}
+				TableAttribute::Policy(p) if !p.db_assigned(rn) => {
+					let mut out = self.db(rn).raw().to_string();
+					for ele in self.db_names(p.check.affected_columns(), rn) {
+						w!(out, "_{}", ele.raw());
+					}
+					w!(out, "_{}", to_snake_case(&p.role.name()));
+					decided_names.push(Some(truncate_auto_name(out, "policy")));
+				}
 				_ => decided_names.push(None),
 			}
 		}
@@ -372,6 +385,9 @@ impl Pgnc<&mut Table> {
 				TableAttribute::Unique(u) if !u.db_assigned(rn) => {
 					u.set_db(rn, DbIdent::new(&name.unwrap()));
 				}
+				TableAttribute::Policy(p) if !p.db_assigned(rn) => {
+					p.set_db(rn, DbIdent::new(&name.unwrap()));
+				}
 				_ => assert!(name.is_none(), "unexpected name for {ann:?}: {name:?}"),
 			}
 		}
@@ -387,6 +403,21 @@ impl Pgnc<&mut Table> {
 			}
 			fk.set_db(rn, DbIdent::new(&truncate_auto_name(out, "fk")));
 		}
+	}
+}
+
+impl Pgnc<&mut Role> {
+	pub fn generate_name(&self, rn: &mut RenameMap) {
+		if self.db_assigned(rn) {
+			return;
+		}
+		let id = self.id().name();
+		let id = if self.annotations.get_single("pgnc", "as_is") == Ok(true) {
+			id
+		} else {
+			to_snake_case(&id)
+		};
+		self.set_db(rn, DbIdent::new(&id));
 	}
 }
 
@@ -494,6 +525,10 @@ fn check_unique<K>(seen: &mut HashSet<Ident<K>>, id: Ident<K>, diagnostics: &mut
 /// truncation, there might be forbidden system tables, and so on.
 /// Identifiers are unique to immigrant, so checking of them is trivial.
 pub fn check_unique_identifiers(schema: &Schema, diagnostics: &mut Report) {
+	let seen_roles = &mut HashSet::new();
+	for role in schema.roles() {
+		check_unique(seen_roles, role.id().to_unknown(), diagnostics);
+	}
 	let seen = &mut HashSet::new();
 	for item in &schema.items() {
 		match item {

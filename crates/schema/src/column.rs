@@ -15,6 +15,7 @@ use crate::{
 	diagnostics::Report,
 	index::{Check, PrimaryKey, UniqueConstraint},
 	names::{ColumnDefName, ColumnIdent, ColumnKind, DbNativeType, DefName, TypeIdent},
+	role::Policy,
 	scalar::PropagatedScalarData,
 	uid::{OwnUid, RenameMap, next_uid},
 };
@@ -44,6 +45,8 @@ pub enum ColumnAttribute {
 	/// After all, it doesn't allow access to old schema version fields directly (except for the current field),
 	/// thus not breaking isolation of a standalone schema definition.
 	InitializeAs(Sql),
+	/// Moved to table.
+	Policy(Policy),
 }
 impl ColumnAttribute {
 	fn as_default(&self) -> Option<&Sql> {
@@ -66,6 +69,7 @@ impl ColumnAttribute {
 				TableAttribute::PrimaryKey(p.propagate_to_table(column))
 			}
 			ColumnAttribute::Index(i) => TableAttribute::Index(i.propagate_to_table(column)),
+			ColumnAttribute::Policy(p) => TableAttribute::Policy(p.propagate_to_table(column)),
 			_ => return Either::Right(self),
 		})
 	}
@@ -80,6 +84,7 @@ impl ColumnAttribute {
 			ColumnAttribute::Index(i) => Self::Index(i.clone_for_propagate()),
 			ColumnAttribute::Default(d) => Self::Default(d.clone()),
 			ColumnAttribute::InitializeAs(i) => Self::InitializeAs(i.clone()),
+			ColumnAttribute::Policy(p) => Self::Policy(p.clone_for_propagate()),
 		}
 	}
 }

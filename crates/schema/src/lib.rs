@@ -11,6 +11,7 @@ use self::{
 	ids::Ident,
 	index::{Check, Index, PrimaryKey, UniqueConstraint},
 	names::{ItemKind, TypeIdent},
+	role::{Policy, Role, RoleGrant},
 	root::Schema,
 	scalar::{Enum, Scalar, ScalarAttribute},
 	sql::Sql,
@@ -30,6 +31,7 @@ pub mod sql;
 pub mod table;
 pub mod trigger;
 pub mod view;
+pub mod role;
 
 pub mod ids;
 pub mod names;
@@ -194,6 +196,7 @@ pub type TableSql<'a> = TableItem<'a, Sql>;
 pub type TablePrimaryKey<'a> = TableItem<'a, PrimaryKey>;
 pub type TableCheck<'a> = TableItem<'a, Check>;
 pub type TableUniqueConstraint<'a> = TableItem<'a, UniqueConstraint>;
+pub type TablePolicy<'a> = TableItem<'a, Policy>;
 
 pub struct SchemaSql<'a> {
 	pub schema: &'a Schema,
@@ -474,6 +477,20 @@ impl SchemaTable<'_> {
 				value,
 			})
 	}
+	pub fn policies(&'_ self) -> impl Iterator<Item = TablePolicy<'_>> {
+		self.attributes
+			.iter()
+			.filter_map(TableAttribute::as_policy)
+			.map(|value| TablePolicy {
+				table: *self,
+				value,
+			})
+	}
+	pub fn role_grants(&self) -> impl Iterator<Item = &RoleGrant> {
+		self.attributes
+			.iter()
+			.filter_map(TableAttribute::as_role_grant)
+	}
 }
 impl Deref for SchemaTable<'_> {
 	type Target = Table;
@@ -495,6 +512,52 @@ impl Deref for SchemaView<'_> {
 
 	fn deref(&self) -> &Self::Target {
 		self.view
+	}
+}
+
+#[derive(Clone, Copy, Derivative)]
+#[derivative(Debug)]
+pub struct SchemaRole<'a> {
+	#[derivative(Debug = "ignore")]
+	pub schema: &'a Schema,
+	pub role: &'a Role,
+}
+impl Deref for SchemaRole<'_> {
+	type Target = Role;
+
+	fn deref(&self) -> &Self::Target {
+		self.role
+	}
+}
+impl HasUid for SchemaRole<'_> {
+	fn uid(&self) -> uid::Uid {
+		self.role.uid()
+	}
+}
+impl HasIdent for SchemaRole<'_> {
+	type Kind = names::RoleKind;
+
+	fn id(&self) -> Ident<Self::Kind> {
+		self.role.id()
+	}
+}
+impl HasDefaultDbName for SchemaRole<'_> {
+	type Kind = names::RoleKind;
+
+	fn default_db(&self) -> Option<DbIdent<Self::Kind>> {
+		self.role.default_db()
+	}
+}
+derive_is_isomorph_by_id_name!(SchemaRole<'_>);
+impl IsCompatible for SchemaRole<'_> {
+	fn is_compatible(
+		&self,
+		_new: &Self,
+		_rn: &RenameMap,
+		_report_self: &mut Report,
+		_report_new: &mut Report,
+	) -> bool {
+		true
 	}
 }
 
@@ -571,7 +634,7 @@ macro_rules! delegate_name_impls {
 				self.value.id()
 			}
 		}
-		impl $crate::HasDefaultDbName for $t {uiaa matrix
+		impl $crate::HasDefaultDbName for $t {
 			type Kind = $k;
 			fn default_db(&self) -> Option<$crate::ids::DbIdent<Self::Kind>> {
 				self.value.default_db()

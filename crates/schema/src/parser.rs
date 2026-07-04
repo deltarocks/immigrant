@@ -14,9 +14,10 @@ use crate::{
 	index::{Check, Index, OpClass, PrimaryKey, UniqueConstraint, Using, With},
 	mixin::Mixin,
 	names::{
-		ColumnIdent, DbProcedure, DefName, EnumItemDefName, FieldIdent, MixinIdent, TableDefName,
-		TableIdent, TypeDefName, TypeIdent, ViewDefName,
+		ColumnIdent, DbProcedure, DefName, EnumItemDefName, FieldIdent, MixinIdent, RoleDefName,
+		RoleIdent, TableDefName, TableIdent, TypeDefName, TypeIdent, ViewDefName,
 	},
+	role::{Permission, Policy, Role, RoleAttribute, RoleGrant},
 	root::{Item, Schema, SchemaProcessOptions},
 	scalar::{Enum, EnumItem, InlineSqlType, InlineSqlTypePart, Scalar, ScalarAttribute},
 	span::{SimpleSpan, SourceId, register_source},
@@ -86,6 +87,7 @@ rule item(s:&S) -> (Item, Vec<Scalar>)
 / t:scalar(s) {(Item::Scalar(t), vec![])}
 / t:composite(s) {(Item::Composite(t), vec![])}
 / t:mixin(s) {(Item::Mixin(t.0), t.1)}
+/ t:role(s) {(Item::Role(t), vec![])}
 
 rule mixin(s:&S) -> (Mixin, Vec<Scalar>) =
 	docs:docs()
@@ -129,6 +131,34 @@ rule table(s:&S) -> (Table, Vec<Scalar>) =
 	), scalars.into_iter().flatten().collect())
 }};
 
+rule role_attribute(s:&S) -> RoleAttribute
+= "default" _ "{" _ p:(p:permission() _ ";" {p})**_ _ "}" {RoleAttribute::Default(p)}
+/ "@external" {RoleAttribute::External}
+rule role(s:&S) -> Role =
+	docs:docs()
+	annotations:annotation_list(s) _
+	"role" _ name:def_name(s) _ "{" _
+		attributes:(a:role_attribute(s) _ ";" {a})**_ _
+	"}" _ ";" {
+	Role::new(docs, annotations, RoleDefName::alloc(name), attributes)
+};
+rule permission() -> Permission
+= "select" {Permission::Select}
+/ "insert" {Permission::Insert}
+/ "update" {Permission::Update}
+/ "delete" {Permission::Delete}
+rule role_grant(s:&S) -> RoleGrant
+= "@role" _ role:code_ident(s) _ "{" _ p:(p:permission() _ ";" {p})**_ _ "}" {
+	RoleGrant {
+		role: RoleIdent::alloc(role),
+		permissions: p,
+	}
+}
+rule policy(s:&S) -> Policy
+= "@policy" _ "." _ "for" _ "(" _ role:code_ident(s) _ ")" _ name:db_ident()? _ "(" _ check:sql(s) _ ")" {
+	Policy::new(name.map(DbIdent::new), RoleIdent::alloc(role), check)
+}
+
 rule definition_part(s:&S) -> DefinitionPart =
 	i:code_ident(s) _ "." _ j:code_ident(s) {DefinitionPart::ColumnRef(TableIdent::alloc(i), ColumnIdent::alloc(j))}
 /	i:code_ident(s) {DefinitionPart::TableRef(TableIdent::alloc(i))}
@@ -153,15 +183,27 @@ rule inline_sql(s:&S) -> InlineSqlType = parts:(
 	}).collect())
 }}
 / s:compat_only(s, <str()>) {InlineSqlType(vec![InlineSqlTypePart::Raw(s.to_string())])}
+rule view_attribute(s:&S) -> ViewAttribute
+= "@security_definer" {ViewAttribute::SecurityDefiner}
+/ g:role_grant(s) {ViewAttribute::RoleGrant(g)}
 rule view(s:&S) -> View =
 	docs:docs()
 	annotations:annotation_list(s) _
-	"view" materialized:(_ "." _ "materialized")? _ name:def_name(s) _ "=" _ definition:definition(s) _ ";" {{
+	"view" materialized:(_ "." _ "materialized")? _ name:def_name(s) _
+	attributes:("{" _ a:(a:view_attribute(s) _ ";" {a})**_ _ "}" _ {a})?
+	"=" _ definition:definition(s) _ ";" {{
+	let mut attributes = attributes.unwrap_or_default();
+	if s.version < 2
+		&& !attributes.iter().any(|a| matches!(a, ViewAttribute::SecurityDefiner))
+	{
+		attributes.push(ViewAttribute::SecurityDefiner);
+	}
 	View::new(
 		docs,
 		annotations,
 		ViewDefName::alloc(name),
 		materialized.is_some(),
+		attributes,
 		definition,
 	)
 }};
@@ -265,11 +307,14 @@ rule column_attribute(s:&S) -> ColumnAttribute
 / pk:primary_key(s) {ColumnAttribute::PrimaryKey(pk)}
 / d:default(s) {ColumnAttribute::Default(d)}
 / d:initialize_as(s) {ColumnAttribute::InitializeAs(d)}
+/ p:policy(s) {ColumnAttribute::Policy(p)}
 rule table_attribute(s:&S) -> TableAttribute
 = c:check(s) {TableAttribute::Check(c)}
 / u:unique(s) {TableAttribute::Unique(u)}
 / pk:primary_key(s) {TableAttribute::PrimaryKey(pk)}
 / i:index(s) {TableAttribute::Index(i)}
+/ p:policy(s) {TableAttribute::Policy(p)}
+/ g:role_grant(s) {TableAttribute::RoleGrant(g)}
 / "@external" {TableAttribute::External}
 / "@rls.owner" {TableAttribute::RlsOwner}
 / "@rls" {TableAttribute::Rls}

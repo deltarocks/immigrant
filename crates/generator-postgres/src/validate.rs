@@ -31,7 +31,8 @@ pub fn validate(_code: &str, schema: &Schema, rn: &RenameMap) {
 							ColumnAttribute::Check(_)
 							| ColumnAttribute::Unique(_)
 							| ColumnAttribute::PrimaryKey(_)
-							| ColumnAttribute::Index(_) => panic!("should be propagated"),
+							| ColumnAttribute::Index(_)
+							| ColumnAttribute::Policy(_) => panic!("should be propagated"),
 							ColumnAttribute::Default(_) | ColumnAttribute::InitializeAs(_) => {}
 						}
 					}
@@ -42,7 +43,9 @@ pub fn validate(_code: &str, schema: &Schema, rn: &RenameMap) {
 						TableAttribute::Unique(u) => validate_db(u, rn),
 						TableAttribute::PrimaryKey(p) => validate_db(p, rn),
 						TableAttribute::Index(i) => validate_db(i, rn),
-						TableAttribute::External
+						TableAttribute::Policy(p) => validate_db(p, rn),
+						TableAttribute::RoleGrant(_)
+						| TableAttribute::External
 						| TableAttribute::Rls
 						| TableAttribute::RlsOwner => {}
 					}
@@ -73,5 +76,8 @@ pub fn validate(_code: &str, schema: &Schema, rn: &RenameMap) {
 			}
 			schema::SchemaItem::View(_) => {}
 		}
+	}
+	for role in schema.roles() {
+		validate_db(&role, rn);
 	}
 }

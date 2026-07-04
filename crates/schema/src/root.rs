@@ -9,19 +9,21 @@ use super::{
 	table::Table,
 };
 use crate::{
-	HasIdent, SchemaComposite, SchemaEnum, SchemaItem, SchemaScalar, SchemaSql, SchemaTable,
-	SchemaTableOrView, SchemaType, SchemaView,
+	HasIdent, SchemaComposite, SchemaEnum, SchemaItem, SchemaRole, SchemaScalar, SchemaSql,
+	SchemaTable, SchemaTableOrView, SchemaType, SchemaView,
 	composite::Composite,
 	diagnostics::Report,
 	ids::Ident,
 	mixin::Mixin,
-	names::{DbNativeType, DbTable, DbType, TableIdent, TypeIdent},
+	names::{DbNativeType, DbTable, DbType, RoleIdent, TableIdent, TypeIdent},
 	process::{NamingConvention, Pgnc, check_unique_identifiers, check_unique_mixin_identifiers},
+	role::{Permission, Role, RoleGrant},
 	scalar::PropagatedScalarData,
 	sql::Sql,
+	table::TableAttribute,
 	uid::{RenameExt, RenameMap},
 	util::UniqueMap as _,
-	view::View,
+	view::{View, ViewAttribute},
 };
 
 #[derive(derivative::Derivative)]
@@ -39,6 +41,8 @@ pub enum Item {
 	Composite(Composite),
 	#[derivative(Debug = "transparent")]
 	View(View),
+	#[derivative(Debug = "transparent")]
+	Role(Role),
 }
 impl Item {
 	pub fn is_table(&self) -> bool {
@@ -92,6 +96,12 @@ impl Item {
 			_ => None,
 		}
 	}
+	pub fn as_view_mut(&mut self) -> Option<&mut View> {
+		match self {
+			Self::View(value) => Some(value),
+			_ => None,
+		}
+	}
 	pub fn as_composite_mut(&mut self) -> Option<&mut Composite> {
 		match self {
 			Self::Composite(value) => Some(value),
@@ -101,6 +111,12 @@ impl Item {
 	pub fn as_scalar_mut(&mut self) -> Option<&mut Scalar> {
 		match self {
 			Self::Scalar(value) => Some(value),
+			_ => None,
+		}
+	}
+	pub fn as_role(&self) -> Option<&Role> {
+		match self {
+			Self::Role(value) => Some(value),
 			_ => None,
 		}
 	}
@@ -123,6 +139,7 @@ impl Schema {
 		report: &mut Report,
 	) {
 		self.0.sort_by_key(|i| match i {
+			Item::Role(_) => 0,
 			Item::Table(_) => 1,
 			Item::Enum(_) => 0,
 			Item::Scalar(_) => 9997,
@@ -224,9 +241,79 @@ impl Schema {
 			table.process();
 		}
 
+		self.fold_role_defaults(report);
+
 		match options.naming_convention {
 			NamingConvention::Postgres => (Pgnc(self)).process_naming(rn),
 		};
+	}
+	fn fold_role_defaults(&mut self, report: &mut Report) {
+		let role_defaults: Vec<(RoleIdent, Vec<Permission>)> = self
+			.roles()
+			.map(|r| (r.id(), r.default_permissions()))
+			.collect();
+		for table in self.0.iter_mut().filter_map(Item::as_table_mut) {
+			for attr in &table.attributes {
+				let role = match attr {
+					TableAttribute::RoleGrant(g) => g.role,
+					TableAttribute::Policy(p) => p.role,
+					_ => continue,
+				};
+				if !role_defaults.iter().any(|(id, _)| *id == role) {
+					report
+						.error("unknown role")
+						.annotate("referenced here", role.span());
+				}
+			}
+			for (role, permissions) in &role_defaults {
+				if table
+					.attributes
+					.iter()
+					.filter_map(TableAttribute::as_role_grant)
+					.any(|g| g.role == *role)
+				{
+					continue;
+				}
+				table.attributes.push(TableAttribute::RoleGrant(RoleGrant {
+					role: *role,
+					permissions: permissions.clone(),
+				}));
+			}
+			let has_policy = table
+				.attributes
+				.iter()
+				.any(|a| matches!(a, TableAttribute::Policy(_)));
+			let has_rls = table
+				.attributes
+				.iter()
+				.any(|a| matches!(a, TableAttribute::Rls));
+			if has_policy && !has_rls {
+				report
+					.error("table has row level security policies, but no @rls attribute")
+					.annotate("defined here", table.id().span());
+			}
+		}
+		for view in self.0.iter_mut().filter_map(Item::as_view_mut) {
+			for attr in &view.attributes {
+				let Some(grant) = attr.as_role_grant() else {
+					continue;
+				};
+				if !role_defaults.iter().any(|(id, _)| *id == grant.role) {
+					report
+						.error("unknown role")
+						.annotate("referenced here", grant.role.span());
+				}
+			}
+			for (role, permissions) in &role_defaults {
+				if view.role_grants().any(|g| g.role == *role) {
+					continue;
+				}
+				view.attributes.push(ViewAttribute::RoleGrant(RoleGrant {
+					role: *role,
+					permissions: permissions.clone(),
+				}));
+			}
+		}
 	}
 	pub fn material_items(&self) -> Vec<SchemaItem<'_>> {
 		self.0
@@ -257,22 +344,25 @@ impl Schema {
 	pub fn items(&self) -> Vec<SchemaItem<'_>> {
 		self.0
 			.iter()
-			.map(|v| match v {
-				Item::Table(table) => SchemaItem::Table(SchemaTable {
-					schema: self,
-					table,
-				}),
-				Item::Enum(en) => SchemaItem::Enum(SchemaEnum { schema: self, en }),
-				Item::Scalar(scalar) => SchemaItem::Scalar(SchemaScalar {
-					schema: self,
-					scalar,
-				}),
-				Item::Composite(composite) => SchemaItem::Composite(SchemaComposite {
-					schema: self,
-					composite,
-				}),
-				Item::View(view) => SchemaItem::View(SchemaView { schema: self, view }),
-				Item::Mixin(_) => unreachable!("mixins are assimilted at the earliest stage"),
+			.filter_map(|v| {
+				Some(match v {
+					Item::Table(table) => SchemaItem::Table(SchemaTable {
+						schema: self,
+						table,
+					}),
+					Item::Enum(en) => SchemaItem::Enum(SchemaEnum { schema: self, en }),
+					Item::Scalar(scalar) => SchemaItem::Scalar(SchemaScalar {
+						schema: self,
+						scalar,
+					}),
+					Item::Composite(composite) => SchemaItem::Composite(SchemaComposite {
+						schema: self,
+						composite,
+					}),
+					Item::View(view) => SchemaItem::View(SchemaView { schema: self, view }),
+					Item::Role(_) => return None,
+					Item::Mixin(_) => unreachable!("mixins are assimilted at the earliest stage"),
+				})
 			})
 			.collect()
 	}
@@ -333,6 +423,19 @@ impl Schema {
 	}
 	pub fn composites(&self) -> impl Iterator<Item = &Composite> {
 		self.0.iter().filter_map(Item::as_composite)
+	}
+	pub fn roles(&self) -> impl Iterator<Item = &Role> {
+		self.0.iter().filter_map(Item::as_role)
+	}
+	pub fn schema_roles(&self) -> Vec<SchemaRole<'_>> {
+		self.roles()
+			.map(|role| SchemaRole { schema: self, role })
+			.collect()
+	}
+	pub fn schema_role(&self, name: RoleIdent) -> Option<SchemaRole<'_>> {
+		self.roles()
+			.find(|r| r.id() == name)
+			.map(|role| SchemaRole { schema: self, role })
 	}
 
 	pub fn schema_table(&self, name: &TableIdent) -> Option<SchemaTable<'_>> {

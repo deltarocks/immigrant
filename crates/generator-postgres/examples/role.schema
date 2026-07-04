@@ -1,0 +1,79 @@
+!!!SETUP
+scalar user_id = sql"INTEGER";
+!!!TEST
+role User {
+	default {
+		select;
+	};
+};
+
+table Name {
+	user_id;
+};
+table Aaa {
+	user_id @policy.for(User) "per-user" (_ == current_setting("app.current_user_id")::user_id);
+
+	@role User {
+		insert;
+	};
+	@rls;
+};
+!!!UPDATE
+role User {
+	default {
+		select;
+	};
+};
+
+table Name {
+	user_id;
+};
+table Aaa {
+	user_id @policy.for(User) "per-user" (_ == current_setting("app.current_user_id")::user_id);
+
+	@rls;
+};
+!!!UPDATE
+role User {
+	default {
+		select;
+	};
+};
+
+table Name {
+	user_id;
+};
+table Aaa {
+	user_id @policy.for(User) "per-user" (_ == current_setting("app.current_user_id")::user_id);
+
+	@rls;
+};
+view AaaView = sql"SELECT * FROM {Aaa}";
+!!!RESULT
+-- updated: setup --
+CREATE DOMAIN user_id AS INTEGER;
+-- updated --
+CREATE ROLE "user";
+CREATE TABLE names (
+	user_id user_id NOT NULL
+);
+GRANT SELECT ON names TO "user";
+CREATE TABLE aaas (
+	user_id user_id NOT NULL
+);
+ALTER TABLE aaas ENABLE ROW LEVEL SECURITY;
+GRANT INSERT ON aaas TO "user";
+CREATE POLICY "per-user" ON aaas FOR ALL TO "user" USING (user_id = (current_setting('app.current_user_id'))::user_id);
+-- updated --
+REVOKE INSERT ON aaas FROM "user";
+GRANT SELECT ON aaas TO "user";
+-- updated --
+CREATE VIEW aaa_views WITH (security_invoker = true) AS SELECT * FROM aaas;
+GRANT SELECT ON aaa_views TO "user";
+-- updated: cleanup schema changes --
+DROP VIEW aaa_views;
+DROP TABLE names;
+DROP TABLE aaas;
+DROP ROLE "user";
+-- updated: cleanup setup --
+DROP DOMAIN user_id;

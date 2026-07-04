@@ -1,0 +1,41 @@
+!!!SETUP
+scalar i32 = sql"INTEGER";
+!!!TEST
+role Admin {
+	@external;
+	default {
+		select;
+		insert;
+		update;
+		delete;
+	};
+};
+
+table A {
+	i32;
+};
+!!!UPDATE
+role Admin {
+	@external;
+	default {
+		select;
+	};
+};
+
+table A {
+	i32;
+};
+!!!RESULT
+-- updated: setup --
+CREATE DOMAIN i32 AS INTEGER;
+-- updated --
+CREATE TABLE "as" (
+	i32 i32 NOT NULL
+);
+GRANT SELECT, INSERT, UPDATE, DELETE ON "as" TO admin;
+-- updated --
+REVOKE INSERT, UPDATE, DELETE ON "as" FROM admin;
+-- updated: cleanup schema changes --
+DROP TABLE "as";
+-- updated: cleanup setup --
+DROP DOMAIN i32;

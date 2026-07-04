@@ -14,6 +14,7 @@ use crate::{
 		ColumnIdent, DbColumn, DbForeignKey, DbNativeType, ForeignKeyKind, MixinIdent,
 		TableDefName, TableIdent, TableKind, TypeIdent,
 	},
+	role::{Policy, RoleGrant},
 	scalar::PropagatedScalarData,
 	uid::{OwnUid, RenameExt, RenameMap, Uid, next_uid},
 	w,
@@ -91,6 +92,8 @@ pub enum TableAttribute {
 	Unique(UniqueConstraint),
 	PrimaryKey(PrimaryKey),
 	Index(Index),
+	Policy(Policy),
+	RoleGrant(RoleGrant),
 	Rls,
 	RlsOwner,
 	External,
@@ -187,12 +190,30 @@ impl TableAttribute {
 		}
 	}
 
+	pub fn as_policy(&self) -> Option<&Policy> {
+		if let Self::Policy(p) = self {
+			Some(p)
+		} else {
+			None
+		}
+	}
+
+	pub fn as_role_grant(&self) -> Option<&RoleGrant> {
+		if let Self::RoleGrant(g) = self {
+			Some(g)
+		} else {
+			None
+		}
+	}
+
 	pub fn clone_for_mixin(&self) -> Self {
 		match self {
 			TableAttribute::Check(c) => Self::Check(c.clone_for_propagate()),
 			TableAttribute::Unique(u) => Self::Unique(u.clone_for_propagate()),
 			TableAttribute::PrimaryKey(p) => Self::PrimaryKey(p.clone_for_propagate()),
 			TableAttribute::Index(i) => Self::Index(i.clone_for_propagate()),
+			TableAttribute::Policy(p) => Self::Policy(p.clone_for_propagate()),
+			TableAttribute::RoleGrant(g) => Self::RoleGrant(g.clone()),
 			TableAttribute::External => Self::External,
 			TableAttribute::Rls => Self::Rls,
 			TableAttribute::RlsOwner => Self::RlsOwner,
@@ -332,6 +353,8 @@ impl<'a> SchemaTable<'a> {
 					}
 				}
 				TableAttribute::Check { .. } => {}
+				TableAttribute::Policy(_) => {}
+				TableAttribute::RoleGrant(_) => {}
 				TableAttribute::External => {}
 				TableAttribute::Rls => {}
 				TableAttribute::RlsOwner => {}

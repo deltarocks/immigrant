@@ -1,5 +1,5 @@
 use std::{
-	collections::{HashMap, HashSet},
+	collections::{BTreeMap, BTreeSet, HashMap, HashSet},
 	fmt::{self, Display},
 	ops::{Deref, DerefMut},
 };
@@ -7,18 +7,20 @@ use std::{
 use itertools::Itertools;
 use schema::{
 	ChangeList, ColumnDiff, Diff, EnumDiff, HasDefaultDbName, HasIdent, HasUid, IsCompatible,
-	IsIsomorph, SchemaComposite, SchemaDiff, SchemaEnum, SchemaItem, SchemaScalar, SchemaSql,
-	SchemaTable, SchemaTableOrView, SchemaType, SchemaView, TableCheck, TableColumn, TableDiff,
-	TableForeignKey, TableIndex, TablePrimaryKey, TableSql, TableUniqueConstraint,
+	IsIsomorph, SchemaComposite, SchemaDiff, SchemaEnum, SchemaItem, SchemaRole, SchemaScalar,
+	SchemaSql, SchemaTable, SchemaTableOrView, SchemaType, SchemaView, TableCheck, TableColumn,
+	TableDiff, TableForeignKey, TableIndex, TablePolicy, TablePrimaryKey, TableSql,
+	TableUniqueConstraint,
 	diagnostics::Report,
 	ids::{DbIdent, Ident},
 	index::Check,
 	mk_change_list,
 	names::{
-		ConstraintKind, DbColumn, DbConstraint, DbEnumItem, DbIndex, DbItem, DbTable, DbType,
-		DbView,
+		ConstraintKind, DbColumn, DbConstraint, DbEnumItem, DbIndex, DbItem, DbPolicy, DbRole,
+		DbTable, DbType, DbView,
 	},
 	renamelist::RenameOp,
+	role::{Permission, RoleGrant},
 	root::Schema,
 	scalar::{EnumItemHandle, ScalarAttribute},
 	sql::{Sql, SqlOp},
@@ -173,6 +175,74 @@ impl Pg<TableSql<'_>> {
 	}
 }
 
+fn object_grants<'g>(
+	grants: impl Iterator<Item = &'g RoleGrant>,
+	schema: &Schema,
+	rn: &RenameMap,
+) -> BTreeMap<DbRole, BTreeSet<Permission>> {
+	let mut out = <BTreeMap<DbRole, BTreeSet<Permission>>>::new();
+	for grant in grants {
+		let Some(role) = schema.schema_role(grant.role) else {
+			continue;
+		};
+		if grant.permissions.is_empty() {
+			continue;
+		}
+		out.entry(role.db(rn))
+			.or_default()
+			.extend(grant.permissions.iter().copied());
+	}
+	out
+}
+fn table_grants(t: &SchemaTable<'_>, rn: &RenameMap) -> BTreeMap<DbRole, BTreeSet<Permission>> {
+	object_grants(t.role_grants(), t.schema, rn)
+}
+fn view_grants(v: &SchemaView<'_>, rn: &RenameMap) -> BTreeMap<DbRole, BTreeSet<Permission>> {
+	object_grants(v.role_grants(), v.schema, rn)
+}
+fn format_permissions(perms: &BTreeSet<Permission>) -> String {
+	perms.iter().map(Permission::sql).join(", ")
+}
+fn print_grant_diff(
+	sql: &mut String,
+	name: &str,
+	old_grants: &BTreeMap<DbRole, BTreeSet<Permission>>,
+	new_grants: &BTreeMap<DbRole, BTreeSet<Permission>>,
+) {
+	for (role, old_perms) in old_grants {
+		let kept = new_grants.get(role);
+		let revoked = old_perms
+			.iter()
+			.filter(|p| kept.is_none_or(|k| !k.contains(p)))
+			.copied()
+			.collect::<BTreeSet<_>>();
+		if !revoked.is_empty() {
+			wl!(
+				sql,
+				"REVOKE {} ON {name} FROM {};",
+				format_permissions(&revoked),
+				Id(role)
+			);
+		}
+	}
+	for (role, new_perms) in new_grants {
+		let had = old_grants.get(role);
+		let granted = new_perms
+			.iter()
+			.filter(|p| had.is_none_or(|h| !h.contains(p)))
+			.copied()
+			.collect::<BTreeSet<_>>();
+		if !granted.is_empty() {
+			wl!(
+				sql,
+				"GRANT {} ON {name} TO {};",
+				format_permissions(&granted),
+				Id(role)
+			);
+		}
+	}
+}
+
 fn pg_constraints<'v>(t: &'v SchemaTable) -> Vec<PgTableConstraint<'v>> {
 	let mut out = vec![];
 	if let Some(pk) = t.primary_key() {
@@ -262,6 +332,18 @@ impl Pg<SchemaTable<'_>> {
 				policies.push(alt_group!("FORCE ROW LEVEL SECURITY"));
 			}
 			self.print_alternations(&policies, sql, rn);
+		}
+
+		for (role, perms) in table_grants(self, rn) {
+			wl!(
+				sql,
+				"GRANT {} ON {table_name} TO {};",
+				format_permissions(&perms),
+				Id(role)
+			);
+		}
+		for policy in self.policies() {
+			Pg(policy).create(sql, rn, report);
 		}
 	}
 	pub fn comment_id(&self, rn: &RenameMap) -> String {
@@ -592,6 +674,69 @@ impl Pg<TableDiff<'_>> {
 
 		fks
 	}
+	pub fn print_policies_drop(
+		&self,
+		sql: &mut String,
+		rn: &mut RenameMap,
+		external: bool,
+		report_old: &mut Report,
+		report_new: &mut Report,
+	) -> Vec<Pg<TablePolicy<'_>>> {
+		let old_policies = self.old.policies().map(Pg).collect_vec();
+		let new_policies = self.new.policies().map(Pg).collect_vec();
+		let policy_changes = mk_change_list(
+			rn,
+			&old_policies,
+			&new_policies,
+			|v| v,
+			report_old,
+			report_new,
+		);
+		if external {
+			return vec![];
+		}
+		for policy in policy_changes.dropped {
+			policy.drop(sql, rn);
+		}
+		{
+			let mut stored = HashMap::new();
+			for ele in policy_changes.renamed {
+				match ele {
+					RenameOp::Rename(p, n, _) => p.rename(n, sql, rn),
+					RenameOp::Store(p, t) => {
+						p.rename(t.db(), sql, rn);
+						stored.insert(t, p);
+					}
+					RenameOp::Restore(t, n, _) => {
+						let p = stored.remove(&t).expect("stored");
+						p.rename(n, sql, rn);
+					}
+					RenameOp::Moveaway(_, _) => {}
+				}
+			}
+		}
+		policy_changes.created
+	}
+	pub fn print_policies_create(
+		&self,
+		sql: &mut String,
+		rn: &RenameMap,
+		created: Vec<Pg<TablePolicy<'_>>>,
+		report: &mut Report,
+	) {
+		for policy in created {
+			policy.create(sql, rn, report);
+		}
+	}
+	pub fn print_grants(&self, sql: &mut String, rn: &RenameMap, external: bool) {
+		if external {
+			return;
+		}
+		let old_grants = table_grants(&self.old, rn);
+		let new_grants = table_grants(&self.new, rn);
+		let table_name = Id(self.new.db(rn)).to_string();
+		print_grant_diff(sql, &table_name, &old_grants, &new_grants);
+	}
 	pub fn print_stage3(
 		&self,
 		sql: &mut String,
@@ -674,6 +819,90 @@ impl Pg<TableForeignKey<'_>> {
 		});
 	}
 }
+impl Pg<SchemaRole<'_>> {
+	pub fn create(&self, sql: &mut String, rn: &RenameMap) {
+		let name = Id(self.db(rn));
+		wl!(sql, "CREATE ROLE {name};");
+	}
+	pub fn drop(&self, sql: &mut String, rn: &RenameMap) {
+		let name = Id(self.db(rn));
+		wl!(sql, "DROP ROLE {name};");
+	}
+	pub fn rename(&self, to: DbRole, sql: &mut String, rn: &mut RenameMap, external: bool) {
+		if !external && self.db(rn) != to {
+			wl!(sql, "ALTER ROLE {} RENAME TO {};", Id(self.db(rn)), Id(&to));
+		}
+		self.set_db(rn, to);
+	}
+}
+
+impl IsIsomorph for Pg<TablePolicy<'_>> {
+	fn is_isomorph(
+		&self,
+		other: &Self,
+		rn: &RenameMap,
+		report_self: &mut Report,
+		report_other: &mut Report,
+	) -> bool {
+		if self.db(rn) == other.db(rn) {
+			return true;
+		}
+		let mut sql_a = String::new();
+		Pg(self.table.sql(&self.check)).print(&mut sql_a, rn, report_self);
+		let mut sql_b = String::new();
+		Pg(other.table.sql(&other.check)).print(&mut sql_b, rn, report_other);
+		self.role.name() == other.role.name() && sql_a == sql_b
+	}
+}
+impl IsCompatible for Pg<TablePolicy<'_>> {
+	fn is_compatible(
+		&self,
+		new: &Self,
+		rn: &RenameMap,
+		report_self: &mut Report,
+		report_new: &mut Report,
+	) -> bool {
+		let mut sql_a = String::new();
+		Pg(self.table.sql(&self.check)).print(&mut sql_a, rn, report_self);
+		let mut sql_b = String::new();
+		Pg(new.table.sql(&new.check)).print(&mut sql_b, rn, report_new);
+		self.role.name() == new.role.name() && sql_a == sql_b
+	}
+}
+impl Pg<TablePolicy<'_>> {
+	pub fn create(&self, sql: &mut String, rn: &RenameMap, report: &mut Report) {
+		let name = Id(self.db(rn));
+		let table_name = Id(self.table.db(rn));
+		let Some(role) = self.table.schema.schema_role(self.role) else {
+			report
+				.error("unknown role")
+				.annotate("referenced here", self.role.span());
+			return;
+		};
+		let role = Id(role.db(rn));
+		w!(sql, "CREATE POLICY {name} ON {table_name} FOR ALL TO {role} USING (");
+		Pg(self.table.sql(&self.check)).print(sql, rn, report);
+		wl!(sql, ");");
+	}
+	pub fn drop(&self, sql: &mut String, rn: &RenameMap) {
+		let name = Id(self.db(rn));
+		let table_name = Id(self.table.db(rn));
+		wl!(sql, "DROP POLICY {name} ON {table_name};");
+	}
+	pub fn rename(&self, to: DbPolicy, sql: &mut String, rn: &mut RenameMap) {
+		if self.db(rn) != to {
+			let table_name = Id(self.table.db(rn));
+			wl!(
+				sql,
+				"ALTER POLICY {} ON {table_name} RENAME TO {};",
+				Id(self.db(rn)),
+				Id(&to)
+			);
+		}
+		self.set_db(rn, to);
+	}
+}
+
 impl IsIsomorph for Pg<TableIndex<'_>> {
 	fn is_isomorph(
 		&self,
@@ -759,6 +988,42 @@ impl Pg<SchemaDiff<'_>> {
 		report_new: &mut Report,
 	) {
 		let changelist = self.changelist(rn, report_old, report_new);
+
+		let old_roles = self.old.schema_roles();
+		let new_roles = self.new.schema_roles();
+		let role_changes = mk_change_list(
+			rn,
+			&old_roles,
+			&new_roles,
+			|v| v,
+			report_old,
+			report_new,
+		);
+		{
+			let mut stored = HashMap::new();
+			for ele in role_changes.renamed {
+				match ele {
+					RenameOp::Rename(r, n, _) => Pg(r).rename(n, sql, rn, r.is_external()),
+					RenameOp::Store(r, t) => {
+						Pg(r).rename(t.db(), sql, rn, r.is_external());
+						stored.insert(t, r);
+					}
+					RenameOp::Restore(t, n, r) => {
+						let stored_role = stored.remove(&t).expect("stored");
+						Pg(stored_role).rename(n, sql, rn, r.is_external());
+					}
+					RenameOp::Moveaway(r, t) => {
+						Pg(r).rename(t.db(), sql, rn, r.is_external());
+					}
+				}
+			}
+		}
+		for role in &role_changes.created {
+			if role.is_external() {
+				continue;
+			}
+			Pg(*role).create(sql, rn);
+		}
 
 		// Rename/moveaway everything
 		for ele in changelist.renamed {
@@ -891,6 +1156,17 @@ impl Pg<SchemaDiff<'_>> {
 				diff.print_stage1_5(sql, rn, diff.new.is_external(), report_old, report_new);
 			fksd.push(changelist);
 		}
+		let mut created_policies = vec![];
+		for diff in &diffs {
+			let created = diff.print_policies_drop(
+				sql,
+				rn,
+				diff.new.is_external(),
+				report_old,
+				report_new,
+			);
+			created_policies.push(created);
+		}
 
 		// Drop old views, in toposorted order
 		{
@@ -969,6 +1245,11 @@ impl Pg<SchemaDiff<'_>> {
 			Pg(diff).print_stage3(sql, rn, column_changes, diff.new.is_external());
 		}
 
+		for (diff, created) in diffs.iter().zip(created_policies) {
+			diff.print_policies_create(sql, rn, created, report_new);
+			diff.print_grants(sql, rn, diff.new.is_external());
+		}
+
 		// Create new views, in toposorted order
 		{
 			let mut remaining_views = changelist
@@ -1020,6 +1301,29 @@ impl Pg<SchemaDiff<'_>> {
 					remaining_views = pending;
 				}
 			}
+		}
+
+		for ele in changelist
+			.updated
+			.iter()
+			.filter(|d| matches!(d.old, SchemaItem::View(_)))
+		{
+			let old = ele.old.as_view().expect("view");
+			let new = ele.new.as_view().expect("view");
+			if old.security_invoker() != new.security_invoker() {
+				Pg(new).print_alternations(
+					&[alt_group!(
+						"SET (security_invoker = {})",
+						new.security_invoker()
+					)],
+					sql,
+					rn,
+				);
+			}
+			let old_grants = view_grants(&old, rn);
+			let new_grants = view_grants(&new, rn);
+			let name = Id(new.db(rn)).to_string();
+			print_grant_diff(sql, &name, &old_grants, &new_grants);
 		}
 
 		// Create new foreign keys
@@ -1107,6 +1411,13 @@ impl Pg<SchemaDiff<'_>> {
 				}
 			}
 		};
+
+		for role in &role_changes.dropped {
+			if role.is_external() {
+				continue;
+			}
+			Pg(*role).drop(sql, rn);
+		}
 
 		// Reconcile comments on schema items
 		for ele in changelist.created {
@@ -1984,7 +2295,15 @@ impl Pg<SchemaView<'_>> {
 		if self.materialized {
 			w!(sql, " MATERIALIZED");
 		}
-		w!(sql, " VIEW {table_name} AS");
+		w!(sql, " VIEW {table_name}");
+		if self.security_invoker() {
+			w!(sql, " WITH (security_invoker = true)");
+		}
+		w!(sql, " AS");
+		if !matches!(self.0.definition.0.first(), Some(DefinitionPart::Raw(r)) if r.starts_with(char::is_whitespace))
+		{
+			w!(sql, " ");
+		}
 		for ele in &self.0.definition.0 {
 			match ele {
 				DefinitionPart::Raw(r) => {
@@ -2034,6 +2353,14 @@ impl Pg<SchemaView<'_>> {
 			}
 		}
 		wl!(sql, ";");
+		for (role, perms) in view_grants(self, rn) {
+			wl!(
+				sql,
+				"GRANT {} ON {table_name} TO {};",
+				format_permissions(&perms),
+				Id(role)
+			);
+		}
 	}
 	pub fn rename(&self, to: DbView, sql: &mut String, rn: &mut RenameMap) {
 		self.print_alternations(&[alt_ungroup!("RENAME TO {}", Id(&to))], sql, rn);
@@ -2283,7 +2610,11 @@ mod tests {
 
 	use schema::diagnostics::Report;
 	use schema::{
-		Diff, parser::parse, process::NamingConvention, root::SchemaProcessOptions, uid::RenameMap,
+		Diff,
+		parser::{SchemaVersion, parse},
+		process::NamingConvention,
+		root::SchemaProcessOptions,
+		uid::RenameMap,
 		wl,
 	};
 	use tempfile::NamedTempFile;
@@ -2302,6 +2633,7 @@ mod tests {
 		#[derive(Debug)]
 		struct Update {
 			description: String,
+			version: SchemaVersion,
 			schema: String,
 		}
 
@@ -2316,14 +2648,27 @@ mod tests {
 			.split("\n!!!UPDATE")
 			.map(|s| {
 				let (description, text) = s.split_once('\n').unwrap_or((s, ""));
+				let description = description.trim();
+				let (version, description) = if let Some(rest) = description.strip_prefix("(v") {
+					let (version, description) =
+						rest.split_once(')').expect("unterminated version marker");
+					(
+						SchemaVersion::Stored(version.parse().expect("version number")),
+						description.trim(),
+					)
+				} else {
+					(SchemaVersion::Current, description)
+				};
 				Update {
-					description: description.trim().to_string(),
+					description: description.to_string(),
+					version,
 					schema: text.to_string(),
 				}
 			})
 			.collect::<Vec<_>>();
 		examples.push(Update {
 			description: "cleanup schema changes".to_owned(),
+			version: SchemaVersion::Current,
 			schema: String::new(),
 		});
 		if !defaults.is_empty() {
@@ -2337,6 +2682,7 @@ mod tests {
 				0,
 				Update {
 					description: "setup".to_owned(),
+					version: SchemaVersion::Current,
 					schema: defaults.to_owned(),
 				},
 			);
@@ -2347,6 +2693,7 @@ mod tests {
 			Update {
 				description: "in the beginning there was nothing (doesn't exist in output)"
 					.to_owned(),
+				version: SchemaVersion::Current,
 				schema: String::new(),
 			},
 		);
@@ -2354,6 +2701,7 @@ mod tests {
 		if !defaults.is_empty() {
 			examples.push(Update {
 				description: "cleanup setup".to_owned(),
+				version: SchemaVersion::Current,
 				schema: String::new(),
 			});
 		}
