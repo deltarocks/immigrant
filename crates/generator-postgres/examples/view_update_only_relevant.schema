@@ -69,24 +69,24 @@ CREATE TABLE bars (
 	x x NOT NULL
 ,	y y NOT NULL
 );
-CREATE VIEW bazs AS 
+CREATE VIEW bazs WITH (security_invoker = true) AS 
 	SELECT * FROM foos
 ;
-CREATE VIEW quxes AS
+CREATE VIEW quxes WITH (security_invoker = true) AS
 	SELECT * FROM bars
 ;
 -- updated: field dropped from Foo, only Baz should be updated. --
 ALTER VIEW bazs RENAME TO moveaway_1;
 DROP VIEW moveaway_1;
 ALTER TABLE foos DROP COLUMN y;
-CREATE VIEW bazs AS
+CREATE VIEW bazs WITH (security_invoker = true) AS
 	SELECT * FROM foos
 ;
 -- updated: field dropped from Bar, only Qux should be updated. --
 ALTER VIEW quxes RENAME TO moveaway_1;
 DROP VIEW moveaway_1;
 ALTER TABLE bars DROP COLUMN x;
-CREATE VIEW quxes AS
+CREATE VIEW quxes WITH (security_invoker = true) AS
 	SELECT * FROM bars
 ;
 -- updated: Bar renamed to quuxes, view Qux should NOT be updated. --

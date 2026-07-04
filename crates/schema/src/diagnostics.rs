@@ -143,7 +143,7 @@ fn diagnostics() {
 		"#;
 	crate::parser::parse(
 		src,
-		false,
+		crate::parser::SchemaVersion::Current,
 		&SchemaProcessOptions {
 			generator_supports_domain: true,
 			naming_convention: NamingConvention::Postgres,

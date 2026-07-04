@@ -28,7 +28,7 @@ CREATE DOMAIN example AS INTEGER;
 CREATE TABLE foos (
 	example example NOT NULL
 );
-CREATE VIEW tests AS
+CREATE VIEW tests WITH (security_invoker = true) AS
 	SELECT * FROM foos
 ;
 CREATE MATERIALIZED VIEW test_materializeds AS
@@ -41,7 +41,7 @@ ALTER MATERIALIZED VIEW test_materializeds RENAME TO moveaway_2;
 ALTER TABLE foos RENAME COLUMN example TO example2;
 DROP VIEW moveaway_1;
 DROP MATERIALIZED VIEW moveaway_2;
-CREATE VIEW tests AS
+CREATE VIEW tests WITH (security_invoker = true) AS
 	SELECT *, (example2 + 2) AS ex2 FROM foos
 ;
 CREATE MATERIALIZED VIEW newname AS

@@ -27,10 +27,10 @@ view Baz = sql"""
 CREATE TABLE bars (
 	foo INTEGER NOT NULL
 );
-CREATE VIEW bazs AS
+CREATE VIEW bazs WITH (security_invoker = true) AS
 	SELECT * FROM bars;
 ;
-CREATE VIEW quxes AS
+CREATE VIEW quxes WITH (security_invoker = true) AS
 	SELECT * FROM bazs;
 ;
 -- updated: also for views --
@@ -39,10 +39,10 @@ ALTER VIEW bazs RENAME TO moveaway_2;
 DROP VIEW moveaway_1;
 DROP VIEW moveaway_2;
 ALTER TABLE bars ALTER COLUMN foo SET DATA TYPE TEXT;
-CREATE VIEW bazs AS
+CREATE VIEW bazs WITH (security_invoker = true) AS
 	SELECT * FROM bars;
 ;
-CREATE VIEW quxes AS
+CREATE VIEW quxes WITH (security_invoker = true) AS
 	SELECT * FROM bazs;
 ;
 -- updated: cleanup schema changes --

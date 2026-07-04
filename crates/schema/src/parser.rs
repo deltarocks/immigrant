@@ -23,7 +23,7 @@ use crate::{
 	sql::{Sql, SqlOp, SqlUnOp},
 	table::{ForeignKey, OnDelete, Table, TableAttribute},
 	uid::RenameMap,
-	view::{Definition, DefinitionPart, View},
+	view::{Definition, DefinitionPart, View, ViewAttribute},
 };
 
 fn h<T>(v: T) -> Box<T> {
@@ -35,10 +35,20 @@ enum InlinePart<T> {
 	Template(T),
 }
 
+// V0: "INTEGER" syntax allowed in place of sql"INTEGER"
+// V1: views were security_invoker = false by default, making underlying tables RLS ignored during SELECT.
+pub const LATEST_SCHEMA_VERSION: u32 = 2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SchemaVersion {
+	Current,
+	Stored(u32),
+}
+
 struct S {
 	id: SourceId,
 	last_inline_scalar: AtomicUsize,
-	compat: bool,
+	version: u32,
 }
 impl S {
 	fn inline_scalar(&self, span: SimpleSpan, def: InlineSqlType) -> (TypeIdent, Option<Scalar>) {
@@ -60,7 +70,7 @@ impl S {
 }
 parser! {
 grammar schema_parser() for str {
-pub(super) rule root(s:&S) -> Schema = _ t:item(s)**_ _ {
+pub(super) rule root(s:&S) -> Schema = _ version_directive()? _ t:item(s)**_ _ {
 	let mut out = Vec::new();
 	for (item, scalars) in t {
 		out.extend(scalars.into_iter().map(Item::Scalar));
@@ -339,11 +349,13 @@ rule inline<T>(x: rule<T>) -> Vec<InlinePart<T>> =
 	custom_inline(<x()>, <"sql\"\"\"">, <"\"\"\"">, <"{">, <"}">)
 /	custom_inline(<x()>, <"sql\"">, <"\"">, <"{">, <"}">)
 rule compat_only<T>(s:&S, x: rule<T>) -> T =
-	v:x() {? if s.compat {
+	v:x() {? if s.version <= 1 {
 		Ok(v)
 	} else {
 		Err("syntax is deprecated and only allowed for old schemas")
 	}}
+
+rule version_directive() = "@!schema_version" _ ['0'..='9']+ _ ";"
 
 
 rule sqlexpr(s:&S) -> Sql = "(" s:sql(s) ")" {s};
@@ -409,21 +421,56 @@ pub enum ParsingError {
 }
 
 type Result<T> = result::Result<T, ()>;
+
+fn scan_version_directive(v: &str) -> Option<(u32, u32, u32)> {
+	let start = v.find("@!schema_version")?;
+	let rest = &v[start + "@!schema_version".len()..];
+	let digits = rest.trim_start();
+	let num: String = digits.chars().take_while(char::is_ascii_digit).collect();
+	let end = start + "@!schema_version".len() + (rest.len() - digits.len()) + num.len();
+	let version = num.parse().ok()?;
+	Some((version, start as u32, end as u32))
+}
+
 pub fn parse(
 	v: &str,
-	compat: bool,
+	schema_version: SchemaVersion,
 	opts: &SchemaProcessOptions,
 	rn: &mut RenameMap,
 	report: &mut Report,
 ) -> Result<Schema> {
 	let span = register_source(v.to_string());
+	let version = match schema_version {
+		SchemaVersion::Current => {
+			if let Some((version, start, end)) = scan_version_directive(v)
+				&& version != LATEST_SCHEMA_VERSION
+			{
+				report
+					.error(format!(
+						"expected schema version {version}, but this version of immigrant supports version {LATEST_SCHEMA_VERSION}"
+					))
+					.annotate("declared here", SimpleSpan::new(span, start, end));
+				return Err(());
+			}
+			LATEST_SCHEMA_VERSION
+		}
+		SchemaVersion::Stored(version) => {
+			if version == 0 || version > LATEST_SCHEMA_VERSION {
+				report.error(format!(
+					"unsupported schema version {version}, this version of immigrant supports versions 1..={LATEST_SCHEMA_VERSION}"
+				));
+				return Err(());
+			}
+			version
+		}
+	};
 	let mut s = in_allocator(|| {
 		schema_parser::root(
 			v,
 			&S {
 				id: span,
 				last_inline_scalar: AtomicUsize::default(),
-				compat,
+				version,
 			},
 		)
 		.map_err(|e| {

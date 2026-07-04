@@ -13,7 +13,12 @@ use clap::{CommandFactory, FromArgMatches, Parser};
 use cli::{current_schema, display_reports, generate_sql, parse_schema, stored_schema};
 use file_diffs::{Migration, MigrationId, find_root, list, list_ids};
 use generator_postgres::Pg;
-use schema::{diagnostics::Report, root::Schema, uid::RenameMap};
+use schema::{
+	diagnostics::Report,
+	parser::{LATEST_SCHEMA_VERSION, SchemaVersion},
+	root::Schema,
+	uid::RenameMap,
+};
 
 #[derive(Parser)]
 #[clap(author, version, allow_external_subcommands = true)]
@@ -197,6 +202,7 @@ fn main() -> anyhow::Result<()> {
 			let mut migration = Migration::new(
 				name.to_owned(),
 				description.to_owned(),
+				LATEST_SCHEMA_VERSION,
 				before_up_sql,
 				after_up_sql,
 				before_down_sql,
@@ -296,11 +302,17 @@ fn main() -> anyhow::Result<()> {
 			let mut current_schema_str = String::new();
 			let mut current_schema = Schema::default();
 			let mut rn = RenameMap::default();
+			let mut schema_version = 1;
 			for (id, migration, _) in list {
 				let old_schema_str = current_schema_str.clone();
 				current_schema_str = migration.apply_diff(current_schema_str)?;
+				schema_version = schema_version.max(migration.schema_version);
 				let mut crn = RenameMap::default();
-				let (updated_schema, report) = parse_schema(&current_schema_str, true, &mut crn)?;
+				let (updated_schema, report) = parse_schema(
+					&current_schema_str,
+					SchemaVersion::Stored(schema_version),
+					&mut crn,
+				)?;
 				rn.merge(crn);
 				generator_postgres::validate::validate(&current_schema_str, &updated_schema, &rn);
 

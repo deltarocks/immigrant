@@ -2364,7 +2364,7 @@ mod tests {
 				let mut report = Report::new();
 				let schema = match parse(
 					example.schema.as_str(),
-					false,
+					example.version,
 					&default_options(),
 					&mut rn,
 					&mut report,

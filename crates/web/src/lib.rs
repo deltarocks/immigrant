@@ -1,5 +1,6 @@
 use generator_postgres::Pg;
 use schema::diagnostics::Report;
+use schema::parser::SchemaVersion;
 use schema::root::SchemaProcessOptions;
 use schema::uid::RenameMap;
 use wasm_bindgen::prelude::wasm_bindgen;
@@ -51,7 +52,7 @@ pub fn diff(a: String, b: String) -> DiffResult {
 	let mut rn = RenameMap::new();
 	let a = schema::parser::parse(
 		&a,
-		false,
+		SchemaVersion::Current,
 		&SchemaProcessOptions {
 			generator_supports_domain: true,
 			naming_convention: schema::process::NamingConvention::Postgres,
@@ -62,7 +63,7 @@ pub fn diff(a: String, b: String) -> DiffResult {
 	let mut report_b = Report::new();
 	let b = schema::parser::parse(
 		&b,
-		false,
+		SchemaVersion::Current,
 		&SchemaProcessOptions {
 			generator_supports_domain: true,
 			naming_convention: schema::process::NamingConvention::Postgres,

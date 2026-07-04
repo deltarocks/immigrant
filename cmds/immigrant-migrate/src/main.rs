@@ -14,6 +14,7 @@ use diesel_async::{
 	SimpleAsyncConnection as _, TransactionManager as _,
 };
 use file_diffs::{Migration, MigrationId, find_root, list};
+use schema::parser::LATEST_SCHEMA_VERSION;
 use tracing::{error, warn};
 
 #[derive(Parser)]
@@ -72,15 +73,17 @@ async fn run_migrations(
 	migration: String,
 	migrations_table: &str,
 	schema_str: &str,
+	schema_version: u32,
 ) -> Result<()> {
 	AnsiTransactionManager::begin_transaction(conn).await?;
 
 	let result: Result<(), diesel::result::Error> = async {
 		sql_query(format!(
-			"INSERT INTO {migrations_table}(version, schema) VALUES ($1, $2);"
+			"INSERT INTO {migrations_table}(version, schema, schema_version) VALUES ($1, $2, $3);"
 		))
 		.bind::<Integer, _>(id as i32)
 		.bind::<Text, _>(schema_str)
+		.bind::<Integer, _>(schema_version as i32)
 		.execute(conn)
 		.await?;
 		conn.batch_execute(&migration).await?;
@@ -123,9 +126,11 @@ async fn main() -> Result<()> {
 					version INTEGER NOT NULL PRIMARY KEY,
 					run_on TIMESTAMP NOT NULL DEFAULT NOW(),
 					-- Either <noop>, <reset>%fullImmigrantSchema, or <diff>%diffImmigrantSchema
-					schema TEXT
+					schema TEXT,
+					schema_version INTEGER NOT NULL DEFAULT 1
 				);
 				ALTER TABLE {migrations_table} ADD COLUMN IF NOT EXISTS schema TEXT;
+				ALTER TABLE {migrations_table} ADD COLUMN IF NOT EXISTS schema_version INTEGER NOT NULL DEFAULT 1;
 			"#
 	))
 	.await?;
@@ -198,7 +203,15 @@ async fn main() -> Result<()> {
 		let mut path = path.to_owned();
 		path.push("up.sql");
 		let sql = fs::read_to_string(&path).context("reading migration up.sql file")?;
-		run_migrations(&mut conn, id.id, sql, migrations_table, &check_str).await?;
+		run_migrations(
+			&mut conn,
+			id.id,
+			sql,
+			migrations_table,
+			&check_str,
+			schema.schema_version,
+		)
+		.await?;
 	}
 	if had_mismatched_migrations {
 		bail!(
@@ -221,6 +234,7 @@ async fn main() -> Result<()> {
 			let mut migration = Migration::new(
 				"pending_check".to_owned(),
 				"pending_check".to_owned(),
+				LATEST_SCHEMA_VERSION,
 				None,
 				None,
 				None,
@@ -259,6 +273,7 @@ async fn main() -> Result<()> {
 			let mut migration = Migration::new(
 				name.to_owned(),
 				description.to_owned(),
+				LATEST_SCHEMA_VERSION,
 				before_up_sql,
 				after_up_sql,
 				before_down_sql,
@@ -303,6 +318,7 @@ async fn main() -> Result<()> {
 				sql.clone(),
 				migrations_table,
 				&migration.schema_check_string(),
+				migration.schema_version,
 			)
 			.await
 			{

@@ -1,0 +1,36 @@
+!!!SETUP
+scalar i32 = sql"INTEGER";
+!!!TEST (v1) v1 views are security definer
+table A {
+	i32;
+};
+view V = sql"SELECT * FROM {A}";
+!!!UPDATE v2 upgrade alters views to security invoker
+table A {
+	i32;
+};
+view V = sql"SELECT * FROM {A}";
+!!!UPDATE explicit opt-out returns to security definer
+table A {
+	i32;
+};
+view V {
+	@security_definer;
+} = sql"SELECT * FROM {A}";
+!!!RESULT
+-- updated: setup --
+CREATE DOMAIN i32 AS INTEGER;
+-- updated: v1 views are security definer --
+CREATE TABLE "as" (
+	i32 i32 NOT NULL
+);
+CREATE VIEW vs AS SELECT * FROM "as";
+-- updated: v2 upgrade alters views to security invoker --
+ALTER VIEW vs SET (security_invoker = true);
+-- updated: explicit opt-out returns to security definer --
+ALTER VIEW vs SET (security_invoker = false);
+-- updated: cleanup schema changes --
+DROP VIEW vs;
+DROP TABLE "as";
+-- updated: cleanup setup --
+DROP DOMAIN i32;

@@ -8,7 +8,7 @@ use file_diffs::{Migration, MigrationId};
 use generator_postgres::Pg;
 use schema::{
 	diagnostics::Report,
-	parser,
+	parser::{self, SchemaVersion},
 	process::NamingConvention,
 	root::{Schema, SchemaProcessOptions},
 	uid::RenameMap,
@@ -17,13 +17,13 @@ use tracing::debug;
 
 pub fn parse_schema(
 	schema: &str,
-	compat: bool,
+	version: SchemaVersion,
 	rn: &mut RenameMap,
 ) -> anyhow::Result<(Schema, Report)> {
 	let mut report = Report::new();
 	let s = parser::parse(
 		schema,
-		compat,
+		version,
 		&SchemaProcessOptions {
 			generator_supports_domain: true,
 			naming_convention: NamingConvention::Postgres,
@@ -46,7 +46,7 @@ pub fn current_schema(dir: &Path) -> anyhow::Result<(String, Schema, Report, Ren
 	name.push("db.schema");
 	let schema_str = fs::read_to_string(&name)?;
 	let mut rn = RenameMap::default();
-	let (schema, report) = parse_schema(&schema_str, false, &mut rn)?;
+	let (schema, report) = parse_schema(&schema_str, SchemaVersion::Current, &mut rn)?;
 	generator_postgres::validate::validate(&schema_str, &schema, &rn);
 	Ok((schema_str, schema, report, rn))
 }
@@ -60,8 +60,13 @@ pub fn stored_schema(
 		debug!("patch {}", i.slug);
 		schema_str = migration.apply_diff(schema_str)?;
 	}
+	let version = list
+		.iter()
+		.map(|(_, m, _)| m.schema_version)
+		.max()
+		.unwrap_or(1);
 	let mut rn = RenameMap::default();
-	let (schema, report) = parse_schema(&schema_str, true, &mut rn)?;
+	let (schema, report) = parse_schema(&schema_str, SchemaVersion::Stored(version), &mut rn)?;
 	Ok((schema_str, schema, report, rn))
 }
 

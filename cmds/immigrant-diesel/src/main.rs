@@ -931,7 +931,7 @@ fn generate_schema(schema: Schema, report: &mut Report, rn: &RenameMap) -> anyho
 #[cfg(test)]
 mod tests {
 	use schema::diagnostics::Report;
-	use schema::parser::parse;
+	use schema::parser::{SchemaVersion, parse};
 	use schema::process::NamingConvention;
 	use schema::root::SchemaProcessOptions;
 	use schema::uid::RenameMap;
@@ -949,7 +949,7 @@ mod tests {
 		let mut rn = RenameMap::default();
 		let mut report = Report::new();
 		let schema =
-			parse(schema, false, &default_options(), &mut rn, &mut report).expect("parse result");
+			parse(schema, SchemaVersion::Current, &default_options(), &mut rn, &mut report).expect("parse result");
 		let generated = generate_schema(schema, &mut report, &rn).expect("generate");
 		assert!(!report.is_error());
 		println!("{generated}");

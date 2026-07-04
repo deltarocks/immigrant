@@ -41,4 +41,11 @@ impl View {
 			definition,
 		}
 	}
+	pub fn security_invoker(&self) -> bool {
+		!self.materialized
+			&& !self
+				.attributes
+				.iter()
+				.any(|a| matches!(a, ViewAttribute::SecurityDefiner))
+	}
 }

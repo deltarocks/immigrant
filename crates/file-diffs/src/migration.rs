@@ -23,6 +23,8 @@ pub enum Error {
 	MissingHeader,
 	#[error("unexpected header: {0}")]
 	UnexpectedHeader(String),
+	#[error("invalid schema version: {0}")]
+	InvalidSchemaVersion(String),
 }
 pub type Result<T, E = Error> = result::Result<T, E>;
 
@@ -36,6 +38,7 @@ pub struct Migration {
 	// id: MigrationId,
 	name: String,
 	description: String,
+	pub schema_version: u32,
 	schema_diff: MigrationSchemaDiff,
 	pub before_up_sql: String,
 	pub after_up_sql: String,
@@ -46,6 +49,7 @@ impl Migration {
 	pub fn new(
 		name: String,
 		description: String,
+		schema_version: u32,
 		before_up: Option<String>,
 		after_up: Option<String>,
 		before_down: Option<String>,
@@ -55,6 +59,7 @@ impl Migration {
 		Self {
 			name,
 			description,
+			schema_version,
 			before_up_sql: before_up.unwrap_or_default(),
 			after_up_sql: after_up.unwrap_or_default(),
 			before_down_sql: before_down.unwrap_or_default(),
@@ -135,10 +140,14 @@ impl FromStr for Migration {
 
 		let description = until_next_header(&mut lines);
 
-		let schema_diff = if lines.next_if_eq(&"## Schema diff").is_some() {
+		let mut schema_version = 1;
+		let schema_diff = if let Some(version) = next_if_versioned_header(&mut lines, "## Schema diff")
+		{
+			schema_version = version?;
 			let schema_diff = until_next_header(&mut lines);
 			MigrationSchemaDiff::Diff(OwnedPatch::from_str(&schema_diff)?)
-		} else if lines.next_if_eq(&"## Schema reset").is_some() {
+		} else if let Some(version) = next_if_versioned_header(&mut lines, "## Schema reset") {
+			schema_version = version?;
 			let schema_diff = code_block(&mut lines);
 			MigrationSchemaDiff::Reset(schema_diff)
 		} else {
@@ -174,6 +183,7 @@ impl FromStr for Migration {
 		Ok(Migration {
 			name,
 			description,
+			schema_version,
 			schema_diff,
 			before_up_sql,
 			after_up_sql,
@@ -188,11 +198,16 @@ impl fmt::Display for Migration {
 		if !self.description.is_empty() {
 			writeln!(f, "{}", self.description)?;
 		}
+		let version_suffix = if self.schema_version != 1 {
+			format!(" (v{})", self.schema_version)
+		} else {
+			String::new()
+		};
 		match &self.schema_diff {
 			MigrationSchemaDiff::None => {}
 			MigrationSchemaDiff::Reset(reset) => {
 				writeln!(f)?;
-				writeln!(f, "## Schema reset")?;
+				writeln!(f, "## Schema reset{version_suffix}")?;
 				writeln!(f, "```immigrant")?;
 				writeln!(f, "{reset}")?;
 				writeln!(f, "```")?;
@@ -200,7 +215,7 @@ impl fmt::Display for Migration {
 			}
 			MigrationSchemaDiff::Diff(diff) => {
 				writeln!(f)?;
-				writeln!(f, "## Schema diff")?;
+				writeln!(f, "## Schema diff{version_suffix}")?;
 				write!(f, "{diff}")?;
 			}
 		}
@@ -227,6 +242,21 @@ impl fmt::Display for Migration {
 
 		Ok(())
 	}
+}
+
+fn next_if_versioned_header(l: &mut Peekable<Lines>, name: &str) -> Option<Result<u32>> {
+	let line = *l.peek()?;
+	let rest = line.strip_prefix(name)?;
+	let version = if rest.is_empty() {
+		Ok(1)
+	} else {
+		let version = rest.strip_prefix(" (v").and_then(|r| r.strip_suffix(')'))?;
+		version
+			.parse()
+			.map_err(|_| InvalidSchemaVersion(line.to_owned()))
+	};
+	l.next();
+	Some(version)
 }
 
 fn skip_empty(l: &mut Peekable<Lines>) {
