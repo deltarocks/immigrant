@@ -67,45 +67,6 @@
                 strictDeps = true;
                 nativeBuildInputs = sharedDeps;
               };
-              immigrant-web =
-                let
-                  craneLibWasm = craneLib.overrideToolchain (
-                    rust.override {
-                      targets = [ "wasm32-unknown-unknown" ];
-                    }
-                  );
-                  cargoArtifacts = craneLibWasm.buildDepsOnly {
-                    inherit src;
-                    pname = "immigrant-web-deps";
-                    doCheck = false;
-                    cargoExtraArgs = "--lib -p immigrant-web --target wasm32-unknown-unknown";
-                    nativeBuildInputs = sharedDeps;
-                  };
-                  wasmLib = craneLibWasm.buildPackage {
-                    inherit src cargoArtifacts;
-                    pname = "immigrant-web";
-                    doCheck = false;
-                    cargoExtraArgs = "--lib -p immigrant-web --target wasm32-unknown-unknown";
-                    nativeBuildInputs = sharedDeps;
-                    installPhaseCommand = ''
-                      mkdir -p $out/lib
-                      cp target/wasm32-unknown-unknown/release/immigrant_web.wasm $out/lib/
-                    '';
-                  };
-                in
-                pkgs.stdenv.mkDerivation {
-                  pname = "immigrant-web";
-                  version = "0.2.0";
-                  dontUnpack = true;
-                  nativeBuildInputs = [ pkgs.wasm-bindgen-cli ];
-                  buildPhase = ''
-                    wasm-bindgen ${wasmLib}/lib/immigrant_web.wasm \
-                      --out-dir $out \
-                      --target web \
-                      --out-name web
-                  '';
-                  installPhase = "true";
-                };
             };
           shelly.shells.default = {
             factory = craneLib.devShell;

@@ -63,7 +63,7 @@ class TableColumn extends TableItem {
 		this.fks.push({ col: to, onDelete });
 		return this;
 	}
-	output() {
+	output(): string[] {
 		const v = this.name === this.ty
 			? `${this.name}${optionStr(this.#optional, "?")}`
 			: `${this.name}${optionStr(this.#optional, "?")}: ${this.ty}`;
@@ -86,12 +86,12 @@ export class Scalar extends SchemaItem {
 		return this;
 	}
 	#default?: string;
-	default(expr: string) {
+	default(expr: string): this {
 		assert(!this.#default, "default is already set");
 		this.#default = expr;
 		return this;
 	}
-	output() {
+	output(): string[] {
 		return pruned([
 			optional(this.#inline, "@inline"),
 			`scalar ${this.name} = sql"${this.sql}"${spStr(this.#default)};`,
@@ -102,7 +102,7 @@ export class Scalar extends SchemaItem {
 export class Table extends SchemaItem {
 	items: TableItem[] = [];
 
-	column(name: string, ty?: Scalar) {
+	column(name: string, ty?: Scalar): TableColumn {
 		const existing = this.items.find((i) =>
 			i instanceof TableColumn && i.name === name
 		) as TableColumn | undefined;
@@ -121,7 +121,7 @@ export class Table extends SchemaItem {
 		return column;
 	}
 
-	output() {
+	output(): string[] {
 		return [
 			`table ${this.name} {`,
 			...indented(this.items.flatMap((v) => v.output())),
@@ -137,7 +137,7 @@ export class Schema {
 		this.items.push(table);
 		return table;
 	}
-	scalar(name: string, sql: string) {
+	scalar(name: string, sql: string): Scalar {
 		const existing = this.items.find((v) =>
 			v instanceof Scalar && v.name === name
 		) as Scalar | undefined;
@@ -150,7 +150,7 @@ export class Schema {
 		return scalar;
 	}
 
-	toString() {
+	toString(): string {
 		this.items.sort((a, b) => {
 			if (a instanceof Scalar && !(b instanceof Scalar)) return -1;
 			return 0;
