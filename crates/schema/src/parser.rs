@@ -261,6 +261,8 @@ rule table_attribute(s:&S) -> TableAttribute
 / pk:primary_key(s) {TableAttribute::PrimaryKey(pk)}
 / i:index(s) {TableAttribute::Index(i)}
 / "@external" {TableAttribute::External}
+/ "@rls.owner" {TableAttribute::RlsOwner}
+/ "@rls" {TableAttribute::Rls}
 rule composite_attribute(s:&S) -> CompositeAttribute
 = c:check(s) {CompositeAttribute::Check(c)}
 rule field_attribute(s:&S) -> FieldAttribute

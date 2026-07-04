@@ -42,7 +42,9 @@ pub fn validate(_code: &str, schema: &Schema, rn: &RenameMap) {
 						TableAttribute::Unique(u) => validate_db(u, rn),
 						TableAttribute::PrimaryKey(p) => validate_db(p, rn),
 						TableAttribute::Index(i) => validate_db(i, rn),
-						TableAttribute::External => {}
+						TableAttribute::External
+						| TableAttribute::Rls
+						| TableAttribute::RlsOwner => {}
 					}
 				}
 			}

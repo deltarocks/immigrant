@@ -22,6 +22,7 @@ use schema::{
 	root::Schema,
 	scalar::{EnumItemHandle, ScalarAttribute},
 	sql::{Sql, SqlOp},
+	table::TableAttribute,
 	uid::{RenameExt, RenameMap},
 	view::DefinitionPart,
 	w, wl,
@@ -243,6 +244,25 @@ impl Pg<SchemaTable<'_>> {
 				);
 			}
 		}
+
+		{
+			let mut policies = vec![];
+			if self
+				.attributes
+				.iter()
+				.any(|t| matches!(t, TableAttribute::Rls))
+			{
+				policies.push(alt_group!("ENABLE ROW LEVEL SECURITY"));
+			}
+			if self
+				.attributes
+				.iter()
+				.any(|t| matches!(t, TableAttribute::RlsOwner))
+			{
+				policies.push(alt_group!("FORCE ROW LEVEL SECURITY"));
+			}
+			self.print_alternations(&policies, sql, rn);
+		}
 	}
 	pub fn comment_id(&self, rn: &RenameMap) -> String {
 		let table_name = Id(self.db(rn));
@@ -404,6 +424,43 @@ impl Pg<TableDiff<'_>> {
 					}
 				};
 			}
+		}
+
+		// Update RLS flag
+		let old_rls = self
+			.old
+			.attributes
+			.iter()
+			.any(|a| matches!(a, TableAttribute::Rls));
+		let new_rls = self
+			.new
+			.attributes
+			.iter()
+			.any(|a| matches!(a, TableAttribute::Rls));
+		let old_rls_owner = self
+			.old
+			.attributes
+			.iter()
+			.any(|a| matches!(a, TableAttribute::RlsOwner));
+		let new_rls_owner = self
+			.new
+			.attributes
+			.iter()
+			.any(|a| matches!(a, TableAttribute::RlsOwner));
+
+		if old_rls != new_rls {
+			out.push(if new_rls {
+				alt_group!("ENABLE ROW LEVEL SECURITY")
+			} else {
+				alt_group!("DISABLE ROW LEVEL SECURITY")
+			});
+		}
+		if old_rls_owner != new_rls_owner {
+			out.push(if new_rls_owner {
+				alt_group!("FORCE ROW LEVEL SECURITY")
+			} else {
+				alt_group!("NO FORCE ROW LEVEL SECURITY")
+			});
 		}
 
 		if !external {
@@ -2314,17 +2371,12 @@ mod tests {
 				) {
 					Ok(s) => s,
 					Err(e) => {
-						panic!()
-						// for e in &e {
-						// 	match e {
-						// 		schema::parser::ParsingError::Peg(e) => {
-						// 			eprintln!(
-						// 				"buffer start: {}",
-						// 				&example.schema.as_str()[e.location.offset..]
-						// 			);
-						// 		}
-						// 	}
-						// }
+						let e = report.to_hi_doc(&example.schema);
+
+						for e in &e {
+							eprintln!("{}", hi_doc::source_to_ansi(e));
+						}
+						panic!("failed to parse schema: {}", example.schema.as_str());
 						// panic!("failed to parse schema:\n{}\n\n{e:#?}", example.schema);
 					}
 				};

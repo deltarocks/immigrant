@@ -1,0 +1,66 @@
+!!!SETUP
+scalar i32 = sql"INTEGER";
+!!!TEST
+table A {
+	i32;
+	@rls;
+	@rls.owner;
+};
+table B {
+	i32;
+};
+!!!UPDATE
+table A {
+	i32;
+};
+table B {
+	i32;
+	@rls;
+	@rls.owner;
+};
+!!!UPDATE
+table A {
+	i32;
+	@rls;
+	@rls.owner;
+};
+table B {
+	i32;
+};
+!!!RESULT
+-- updated: setup --
+CREATE DOMAIN i32 AS INTEGER;
+-- updated --
+CREATE TABLE "as" (
+	i32 i32 NOT NULL
+);
+ALTER TABLE "as"
+	ENABLE ROW LEVEL SECURITY
+,	FORCE ROW LEVEL SECURITY
+;
+CREATE TABLE bs (
+	i32 i32 NOT NULL
+);
+-- updated --
+ALTER TABLE "as"
+	DISABLE ROW LEVEL SECURITY
+,	NO FORCE ROW LEVEL SECURITY
+;
+ALTER TABLE bs
+	ENABLE ROW LEVEL SECURITY
+,	FORCE ROW LEVEL SECURITY
+;
+-- updated --
+ALTER TABLE "as"
+	ENABLE ROW LEVEL SECURITY
+,	FORCE ROW LEVEL SECURITY
+;
+ALTER TABLE bs
+	DISABLE ROW LEVEL SECURITY
+,	NO FORCE ROW LEVEL SECURITY
+;
+-- updated: cleanup schema changes --
+DROP TABLE "as";
+DROP TABLE bs;
+-- updated: cleanup setup --
+DROP DOMAIN i32;

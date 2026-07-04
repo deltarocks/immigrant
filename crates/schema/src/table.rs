@@ -91,6 +91,8 @@ pub enum TableAttribute {
 	Unique(UniqueConstraint),
 	PrimaryKey(PrimaryKey),
 	Index(Index),
+	Rls,
+	RlsOwner,
 	External,
 }
 
@@ -146,7 +148,7 @@ impl ForeignKey {
 		Self::new(
 			self.name.clone(),
 			self.source_fields.clone(),
-			self.target.clone(),
+			self.target,
 			self.target_fields.clone(),
 			self.on_delete,
 		)
@@ -192,6 +194,8 @@ impl TableAttribute {
 			TableAttribute::PrimaryKey(p) => Self::PrimaryKey(p.clone_for_propagate()),
 			TableAttribute::Index(i) => Self::Index(i.clone_for_propagate()),
 			TableAttribute::External => Self::External,
+			TableAttribute::Rls => Self::Rls,
+			TableAttribute::RlsOwner => Self::RlsOwner,
 		}
 	}
 }
@@ -329,6 +333,8 @@ impl<'a> SchemaTable<'a> {
 				}
 				TableAttribute::Check { .. } => {}
 				TableAttribute::External => {}
+				TableAttribute::Rls => {}
+				TableAttribute::RlsOwner => {}
 			}
 		}
 		// FIXME: Wrong assumption? When target is one, it doesn't mean the source is one too

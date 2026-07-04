@@ -852,6 +852,7 @@ name = "immigrant-generator-postgres"
 version = "0.2.2"
 dependencies = [
  "blake2",
+ "hi-doc",
  "immigrant-schema",
  "itertools",
  "permutation",
