@@ -125,7 +125,13 @@ impl Column {
 	}
 }
 impl IsCompatible for Column {
-	fn is_compatible(&self, _new: &Self, _rn: &RenameMap, _a: &mut Report, _b: &mut Report) -> bool {
+	fn is_compatible(
+		&self,
+		_new: &Self,
+		_rn: &RenameMap,
+		_a: &mut Report,
+		_b: &mut Report,
+	) -> bool {
 		true
 	}
 }

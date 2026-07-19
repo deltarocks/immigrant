@@ -948,8 +948,14 @@ mod tests {
 	fn test_generator(schema: &str) {
 		let mut rn = RenameMap::default();
 		let mut report = Report::new();
-		let schema =
-			parse(schema, SchemaVersion::Current, &default_options(), &mut rn, &mut report).expect("parse result");
+		let schema = parse(
+			schema,
+			SchemaVersion::Current,
+			&default_options(),
+			&mut rn,
+			&mut report,
+		)
+		.expect("parse result");
 		let generated = generate_schema(schema, &mut report, &rn).expect("generate");
 		assert!(!report.is_error());
 		println!("{generated}");

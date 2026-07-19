@@ -25,13 +25,13 @@ pub mod composite;
 pub mod index;
 pub mod mixin;
 pub mod process;
+pub mod role;
 pub mod root;
 pub mod scalar;
 pub mod sql;
 pub mod table;
 pub mod trigger;
 pub mod view;
-pub mod role;
 
 pub mod ids;
 pub mod names;

@@ -141,18 +141,18 @@ impl FromStr for Migration {
 		let description = until_next_header(&mut lines);
 
 		let mut schema_version = 1;
-		let schema_diff = if let Some(version) = next_if_versioned_header(&mut lines, "## Schema diff")
-		{
-			schema_version = version?;
-			let schema_diff = until_next_header(&mut lines);
-			MigrationSchemaDiff::Diff(OwnedPatch::from_str(&schema_diff)?)
-		} else if let Some(version) = next_if_versioned_header(&mut lines, "## Schema reset") {
-			schema_version = version?;
-			let schema_diff = code_block(&mut lines);
-			MigrationSchemaDiff::Reset(schema_diff)
-		} else {
-			MigrationSchemaDiff::None
-		};
+		let schema_diff =
+			if let Some(version) = next_if_versioned_header(&mut lines, "## Schema diff") {
+				schema_version = version?;
+				let schema_diff = until_next_header(&mut lines);
+				MigrationSchemaDiff::Diff(OwnedPatch::from_str(&schema_diff)?)
+			} else if let Some(version) = next_if_versioned_header(&mut lines, "## Schema reset") {
+				schema_version = version?;
+				let schema_diff = code_block(&mut lines);
+				MigrationSchemaDiff::Reset(schema_diff)
+			} else {
+				MigrationSchemaDiff::None
+			};
 
 		let before_up_sql = if lines.next_if_eq(&"## Before").is_some() {
 			until_next_header(&mut lines)

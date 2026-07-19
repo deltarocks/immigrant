@@ -25,9 +25,7 @@ pub enum FieldAttribute {
 impl FieldAttribute {
 	fn propagate_to_composite(self, field: FieldIdent) -> Either<CompositeAttribute, Self> {
 		Either::Left(match self {
-			FieldAttribute::Check(c) => {
-				CompositeAttribute::Check(c.propagate_to_composite(field))
-			}
+			FieldAttribute::Check(c) => CompositeAttribute::Check(c.propagate_to_composite(field)),
 			#[allow(unreachable_patterns)]
 			_ => return Either::Right(self),
 		})

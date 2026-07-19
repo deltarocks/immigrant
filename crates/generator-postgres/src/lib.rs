@@ -880,7 +880,10 @@ impl Pg<TablePolicy<'_>> {
 			return;
 		};
 		let role = Id(role.db(rn));
-		w!(sql, "CREATE POLICY {name} ON {table_name} FOR ALL TO {role} USING (");
+		w!(
+			sql,
+			"CREATE POLICY {name} ON {table_name} FOR ALL TO {role} USING ("
+		);
 		Pg(self.table.sql(&self.check)).print(sql, rn, report);
 		wl!(sql, ");");
 	}
@@ -991,14 +994,8 @@ impl Pg<SchemaDiff<'_>> {
 
 		let old_roles = self.old.schema_roles();
 		let new_roles = self.new.schema_roles();
-		let role_changes = mk_change_list(
-			rn,
-			&old_roles,
-			&new_roles,
-			|v| v,
-			report_old,
-			report_new,
-		);
+		let role_changes =
+			mk_change_list(rn, &old_roles, &new_roles, |v| v, report_old, report_new);
 		{
 			let mut stored = HashMap::new();
 			for ele in role_changes.renamed {
@@ -1158,13 +1155,8 @@ impl Pg<SchemaDiff<'_>> {
 		}
 		let mut created_policies = vec![];
 		for diff in &diffs {
-			let created = diff.print_policies_drop(
-				sql,
-				rn,
-				diff.new.is_external(),
-				report_old,
-				report_new,
-			);
+			let created =
+				diff.print_policies_drop(sql, rn, diff.new.is_external(), report_old, report_new);
 			created_policies.push(created);
 		}
 
