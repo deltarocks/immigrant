@@ -1478,7 +1478,16 @@ impl Pg<SchemaEnum<'_>> {
 		let db_name = Id(self.db(rn));
 		w!(sql, "DROP TYPE {db_name};\n");
 	}
-	pub fn print_alternations(&self, out: &[String], sql: &mut String, rn: &RenameMap) {
+	fn print_alternations_nogroup(&self, out: &[String], sql: &mut String, rn: &RenameMap) {
+		if out.is_empty() {
+			return;
+		}
+		let name = Id(self.db(rn));
+		for alt in out.iter() {
+			wl!(sql, "ALTER TYPE {name} {alt};");
+		}
+	}
+	fn print_alternations(&self, out: &[String], sql: &mut String, rn: &RenameMap) {
 		if out.is_empty() {
 			return;
 		}
@@ -1543,7 +1552,7 @@ impl Pg<EnumDiff<'_>> {
 			changes.push(format!("ADD VALUE '{}'", added.db(rn).raw()));
 		}
 
-		Pg(self.old).print_alternations(&changes, sql, rn);
+		Pg(self.old).print_alternations_nogroup(&changes, sql, rn);
 		assert!(
 			changelist.dropped.is_empty(),
 			"enums with dropped elements are not compatible"

@@ -71,9 +71,7 @@ Value b:
 ALTER TYPE enumeration_to_shrink
 	RENAME TO moveaway_1
 ;
-ALTER TYPE enumeration_to_extend
-	ADD VALUE 'b'
-;
+ALTER TYPE enumeration_to_extend ADD VALUE 'b';
 CREATE TYPE enumeration_to_shrink AS ENUM (
 	'a'
 );
