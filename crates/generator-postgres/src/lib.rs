@@ -1504,7 +1504,7 @@ impl Pg<SchemaEnum<'_>> {
 impl Pg<EnumItemHandle<'_>> {
 	pub fn rename_alter(&self, to: DbEnumItem, rn: &mut RenameMap) -> String {
 		// TODO: Escape both as literals
-		let out = format!("RENAME VALUE '{}' TO {}", self.db(rn).raw(), to.raw());
+		let out = format!("RENAME VALUE '{}' TO '{}'", self.db(rn).raw(), to.raw());
 		self.set_db(rn, to);
 		out
 	}
