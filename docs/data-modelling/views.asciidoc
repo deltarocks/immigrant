@@ -25,3 +25,16 @@ view.materialized UserStats = sql"""
 ----
 
 When referenced tables or columns are renamed, immigrant automatically recreates the view with updated names.
+
+Views may carry an attribute block before `=`, holding role grants and the `@security_definer` opt-out:
+
+[source,immigrant]
+----
+view ActiveUsers {
+    @role Reader {
+        select;
+    };
+} = sql"SELECT * FROM {User}";
+----
+
+Views are security invoker by default, see the link:security.asciidoc[Roles, Grants and RLS page].

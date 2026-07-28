@@ -1,0 +1,275 @@
+= Roles, Grants and RLS
+:order: 6
+
+Immigrant manages PostgreSQL roles, table/view privileges and row level security as part of the schema, so they are diffed and migrated like any other object.
+
+== Roles
+
+[source,immigrant]
+----
+role User {
+    default {
+        select;
+    };
+};
+----
+
+This declares a role that immigrant owns: it emits `CREATE ROLE` when the role appears, `DROP ROLE` when it is removed, and `ALTER ROLE ... RENAME TO` when it is renamed.
+
+Roles follow the same naming rules as other items -- the code name is snake_cased, an explicit database name may be given, and `#pgnc(as_is)` disables the transformation:
+
+[source,immigrant]
+----
+role ReadOnly "reporting_ro" {};
+----
+
+Roles are created before every other object and dropped after them, so grants and policies always have a role to refer to.
+
+=== External roles
+
+`@external` marks a role that exists outside of the schema (created by the cloud provider, an operator, or another application):
+
+[source,immigrant]
+----
+role Admin {
+    @external;
+    default {
+        select;
+        insert;
+        update;
+        delete;
+    };
+};
+----
+
+Immigrant never creates, drops or renames an external role, but it still manages the privileges granted to it.
+
+=== Default permissions
+
+The `default` block lists permissions granted on *every* table and view in the schema:
+
+[source,immigrant]
+----
+role User {
+    default {
+        select;
+    };
+};
+----
+
+Available permissions are `select`, `insert`, `update` and `delete`.
+
+A role without a `default` block gets no privileges unless a table or view grants them explicitly.
+
+== Grants
+
+`@role` inside a table or view body overrides the default for that role, on that object only:
+
+[source,immigrant]
+----
+table Aaa {
+    user_id;
+
+    @role User {
+        insert;
+    };
+};
+----
+
+Here `User` gets `INSERT` on `aaas` and nothing else -- the `select` from the `default` block does not apply, because the object opts out of the default by naming the role.
+
+An empty block revokes everything for that role on that object:
+
+[source,immigrant]
+----
+table Secrets {
+    @role User {};
+};
+----
+
+Views take the same block, in an attribute list placed before `=`:
+
+[source,immigrant]
+----
+view AaaView {
+    @role User {
+        select;
+    };
+} = sql"SELECT * FROM {Aaa}";
+----
+
+Changing permissions produces the minimal delta -- only the added permissions are granted and only the removed ones are revoked:
+
+[source,sql]
+----
+REVOKE INSERT ON aaas FROM "user";
+GRANT SELECT ON aaas TO "user";
+----
+
+Privileges of `@external` tables are not managed.
+
+== Row level security
+
+`@rls` enables row level security on a table, `@rls.owner` additionally forces it for the table owner:
+
+[source,immigrant]
+----
+table Aaa {
+    user_id;
+    @rls;
+    @rls.owner;
+};
+----
+
+[cols="1,2"]
+|===
+|Attribute |SQL
+
+|`@rls`
+|`ENABLE ROW LEVEL SECURITY`
+
+|`@rls.owner`
+|`FORCE ROW LEVEL SECURITY`
+|===
+
+Removing an attribute emits `DISABLE ROW LEVEL SECURITY` / `NO FORCE ROW LEVEL SECURITY`.
+
+Note that RLS without policies denies everything except to the table owner -- add `@rls` together with the policies that should allow access.
+
+== Policies
+
+`@policy.for(Role) "optional-name" (expression)` declares a policy. As a column attribute, `_` is the placeholder for that column:
+
+[source,immigrant]
+----
+table Aaa {
+    user_id @policy.for(User) "per-user" (_ == current_setting("app.current_user_id")::user_id);
+    @rls;
+};
+----
+
+[source,sql]
+----
+CREATE POLICY "per-user" ON aaas FOR ALL TO "user"
+    USING (user_id = (current_setting('app.current_user_id'))::user_id);
+----
+
+The check uses the same expression language as `@check` and `@default`, see the SQL Expression Language page.
+
+A policy may also be written as a table attribute, in which case there is no `_` placeholder and columns are named directly:
+
+[source,immigrant]
+----
+table Post {
+    author_id;
+    published: sql"BOOLEAN";
+    @policy.for(User) (author_id == current_setting("app.current_user_id")::user_id || published);
+    @rls;
+};
+----
+
+Policies always generate `FOR ALL ... USING (...)`.
+
+When the database name is omitted, it is generated as `{table}_{columns}_{role}_policy`, truncated with a hash suffix if it exceeds the identifier limit.
+
+Two policies are considered the same object when they have the same name, or when their role and rendered check are identical -- so renaming a policy emits `ALTER POLICY ... RENAME TO` instead of a drop/create pair.
+
+Declaring a policy on a table without `@rls` is an error, as is referencing a role that is not declared in the schema.
+
+== Views and `security_invoker`
+
+Views are created with `WITH (security_invoker = true)`, so RLS of the underlying tables is evaluated against the role executing the query rather than the view owner:
+
+[source,sql]
+----
+CREATE VIEW aaa_views WITH (security_invoker = true) AS SELECT * FROM aaas;
+----
+
+`@security_definer` opts a view out, restoring the PostgreSQL default:
+
+[source,immigrant]
+----
+view V {
+    @security_definer;
+} = sql"SELECT * FROM {A}";
+----
+
+Toggling the attribute emits `ALTER VIEW ... SET (security_invoker = ...)` without recreating the view.
+
+Materialized views are always security definer -- PostgreSQL does not apply RLS to them.
+
+== Schema versions
+
+`security_invoker` changes the meaning of an existing schema, so it is gated behind a schema version. Old migrations are replayed with the version they were written under, which keeps migration history reproducible.
+
+[cols="1,3"]
+|===
+|Version |Behaviour
+
+|0
+|`"INTEGER"` accepted in place of `sql"INTEGER"`
+
+|1
+|Views are security definer, RLS of underlying tables is bypassed on `SELECT`
+
+|2
+|Views are security invoker unless `@security_definer` is set
+|===
+
+The current schema is always parsed at the latest version (2). A schema file may declare the version it was written for, and immigrant errors out if it does not match the version this binary supports:
+
+[source,immigrant]
+----
+@!schema_version 2;
+----
+
+Migrations record the version in their schema section header, and `immigrant-migrate` stores it in the `schema_version` column of `__immigrant_migrations`:
+
+[source,markdown]
+----
+## Schema diff (v2)
+----
+
+Upgrading is a normal migration -- an existing schema on v1 produces `ALTER VIEW ... SET (security_invoker = true)` for every view the first time a migration is generated with a v2-aware immigrant.
+
+== Full example
+
+[source,immigrant]
+----
+scalar user_id = sql"INTEGER";
+
+role User {
+    default {
+        select;
+    };
+};
+
+table Name {
+    user_id;
+};
+
+table Aaa {
+    user_id @policy.for(User) "per-user" (_ == current_setting("app.current_user_id")::user_id);
+
+    @role User {
+        insert;
+    };
+    @rls;
+};
+----
+
+[source,sql]
+----
+CREATE ROLE "user";
+CREATE TABLE names (
+    user_id user_id NOT NULL
+);
+GRANT SELECT ON names TO "user";
+CREATE TABLE aaas (
+    user_id user_id NOT NULL
+);
+ALTER TABLE aaas ENABLE ROW LEVEL SECURITY;
+GRANT INSERT ON aaas TO "user";
+CREATE POLICY "per-user" ON aaas FOR ALL TO "user"
+    USING (user_id = (current_setting('app.current_user_id'))::user_id);
+----

@@ -282,6 +282,10 @@ table External {
 };
 ----
 
+== @rls, @role, @policy
+
+Row level security, privileges and policies are described on the link:security.asciidoc[Roles, Grants and RLS page].
+
 == Mixins
 
 Reusable groups of columns, attributes, and foreign keys:
