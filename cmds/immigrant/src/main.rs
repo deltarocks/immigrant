@@ -25,8 +25,9 @@ use schema::{
 enum Opts {
 	/// Create migrations directory and empty schema.
 	Init,
-	/// Commit schema changes.
-	Commit {
+	/// Commit schema changes without checking it with the DB. For checking if it would actually apply - use
+	/// `immigrant-migrate`.
+	CommitUnchecked {
 		/// How to name the change.
 		///
 		/// If not set - commit editor will be opened.
@@ -170,7 +171,7 @@ fn main() -> anyhow::Result<()> {
 			fs::create_dir("migrations")?;
 			fs::write("migrations/db.schema", "")?;
 		}
-		Opts::Commit {
+		Opts::CommitUnchecked {
 			message,
 			before_up_sql,
 			after_up_sql,

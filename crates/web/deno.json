@@ -1,7 +1,7 @@
 {
 	"name": "@deltarocks/immigrant",
 	"license": "MIT",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"tasks": {
 		"wasmbuild": "deno run -A @deno/wasmbuild -p immigrant-web --skip-opt"
 	},

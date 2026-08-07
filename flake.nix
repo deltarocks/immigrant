@@ -27,7 +27,6 @@
       imports = [ shelly.flakeModule ];
       perSystem =
         {
-          config,
           system,
           pkgs,
           lib,
