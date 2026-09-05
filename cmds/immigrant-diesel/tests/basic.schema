@@ -1,7 +1,7 @@
-#diesel(type = "dt::Integer", native = "i32", copy)
+#rust(type = "dt::Integer", native = "i32", copy)
 scalar int = sql"INTEGER";
 
-#diesel(type = "dt::Timestamp", custom)
+#rust(type = "dt::Timestamp", custom)
 scalar datetime = sql"TIMESTAMPTZ" @default(now());
 
 table Test {

@@ -71,7 +71,7 @@ fn is_copy(t: &SchemaType) -> bool {
 	match t {
 		SchemaType::Scalar(s) => s
 			.annotations
-			.get_single("diesel", "copy")
+			.get_single("rust", "copy")
 			.expect("diesel copy"),
 		// Enums are always copy
 		SchemaType::Enum(_) => true,
@@ -156,7 +156,7 @@ fn column_raw_ty(ty: SchemaType<'_>, nullable: bool) -> TokenStream {
 		SchemaType::Scalar(s) => {
 			let v: String = s
 				.annotations
-				.get_single("diesel", "type")
+				.get_single("rust", "type")
 				.expect("!!! failed to parse diesel(type) annotation, it should have name of type implementing SqlType, e.g dt::Text\n!!! See the list of builtin types here: https://docs.rs/diesel/latest/diesel/sql_types/\nUnderlying error");
 			let v: Path = syn::parse_str(&v).expect("disesl path");
 			quote!(#v)
@@ -167,24 +167,43 @@ fn column_raw_ty(ty: SchemaType<'_>, nullable: bool) -> TokenStream {
 		}
 	};
 
-	let ty = nullable.then(|| quote!(dt::Nullable<#ty>)).unwrap_or(ty);
+	let ty = if nullable {
+		quote!(dt::Nullable<#ty>)
+	} else {
+		ty
+	};
 	quote! {#ty}
 }
 
 fn column_ty(kind: TableKind, column: TableColumn<'_>) -> TokenStream {
 	let should_use_reference = should_use_reference(kind, is_copy(&column.ty()), column);
 	let ty = column_ty_name(should_use_reference, &column.ty());
-	let ty = should_use_reference.then(|| quote!(&'a #ty)).unwrap_or(ty);
-	let ty = column.nullable.then(|| quote!(Option<#ty>)).unwrap_or(ty);
-	(kind == TableKind::Update && !column.is_pk_part()
-		|| kind == TableKind::New && column.has_default())
-	.then(|| quote!(Option<#ty>))
-	.unwrap_or(ty)
+	let ty = if should_use_reference {
+		quote!(&'a #ty)
+	} else {
+		ty
+	};
+	let ty = if column.nullable {
+		quote!(Option<#ty>)
+	} else {
+		ty
+	};
+	if kind == TableKind::Update && !column.is_pk_part()
+		|| kind == TableKind::New && column.has_default()
+	{
+		quote!(Option<#ty>)
+	} else {
+		ty
+	}
 }
 
 fn field_ty(field: CompositeField<'_>) -> TokenStream {
 	let ty = column_ty_name(false, &field.ty());
-	field.nullable.then(|| quote!(Option<#ty>)).unwrap_or(ty)
+	if field.nullable {
+		quote!(Option<#ty>)
+	} else {
+		ty
+	}
 }
 
 fn format_db_arg() -> TokenStream {
@@ -196,15 +215,15 @@ fn column_ty_name(jojo_reference: bool, ty: &SchemaType) -> TokenStream {
 		SchemaType::Scalar(s) => {
 			let native = s
 				.annotations
-				.try_get_single::<String>("diesel", "native")
-				.expect("failed to parse #diesel(native = \"...\")");
+				.try_get_single::<String>("rust", "native")
+				.expect("failed to parse #rust(native = \"...\")");
 			let native_ref = s
 				.annotations
-				.try_get_single::<String>("diesel", "native_ref")
-				.expect("failed to parse #diesel(native_ref = \"...\")");
+				.try_get_single::<String>("rust", "native_ref")
+				.expect("failed to parse #rust(native_ref = \"...\")");
 			let custom: bool = s
 				.annotations
-				.get_single("diesel", "custom")
+				.get_single("rust", "custom")
 				.expect("failed to parse #diesel(custom)");
 
 			if native_ref.is_some() && native.is_none() {
@@ -346,14 +365,14 @@ fn generate_schema(schema: Schema, report: &mut Report, rn: &RenameMap) -> anyho
 
 		let derives = en
 			.annotations
-			.get_multi::<String>("diesel", "derive")
+			.get_multi::<String>("rust", "derive")
 			.expect("diesel derive")
 			.into_iter()
 			.map(|v| syn::parse_str::<Path>(&v).unwrap());
 
 		let serde: bool = en
 			.annotations
-			.get_single("diesel", "serde")
+			.get_single("rust", "serde")
 			.expect("diesel serde");
 
 		let serde_derive = serde.then(|| quote!(, serde::Serialize, serde::Deserialize));
@@ -412,7 +431,7 @@ fn generate_schema(schema: Schema, report: &mut Report, rn: &RenameMap) -> anyho
 
 		let derives = composite
 			.annotations
-			.get_multi::<String>("diesel", "derive")
+			.get_multi::<String>("rust", "derive")
 			.expect("diesel derive")
 			.into_iter()
 			.map(|v| syn::parse_str::<Path>(&v).unwrap());
@@ -671,7 +690,7 @@ fn generate_schema(schema: Schema, report: &mut Report, rn: &RenameMap) -> anyho
 				TableKind::Load => {
 					let derives = table
 						.annotations
-						.get_multi::<String>("diesel", "derive")
+						.get_multi::<String>("rust", "derive")
 						.expect("diesel derive")
 						.into_iter()
 						.map(|v| syn::parse_str::<Path>(&v).unwrap());
@@ -779,7 +798,11 @@ fn generate_schema(schema: Schema, report: &mut Report, rn: &RenameMap) -> anyho
 						.map(|column| {
 							let id = column_ident(&column);
 							let is_reference = !is_copy(&column.ty());
-							let reference = is_reference.then(|| quote!(&)).unwrap_or_default();
+							let reference = if is_reference {
+								quote!(&)
+							} else {
+								Default::default()
+							};
 							let t = column_ty_name(is_reference, &column.ty());
 							quote!(#id: #reference #t)
 						});
@@ -866,9 +889,11 @@ fn generate_schema(schema: Schema, report: &mut Report, rn: &RenameMap) -> anyho
 
 						let db = format_db_arg();
 						let ret = table_struct_ident(&source_table);
-						let ret = many
-							.then(|| quote!(Vec<#ret>))
-							.unwrap_or_else(|| quote!(#ret));
+						let ret = if many {
+							quote!(Vec<#ret>)
+						} else {
+							quote!(#ret)
+						};
 						methods.push(quote! {
 							pub async fn #method_name(&self, db: &mut #db) -> Result<#ret, Error> {
 								use super::#table_name::{dsl, table};
