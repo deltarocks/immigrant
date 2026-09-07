@@ -440,18 +440,74 @@ fn build_joins(
 	for pragma in pragmas(
 		&table.annotations,
 		"dbt_join",
-		Some(&["model", "sql_on", "relationship", "alias", "hidden"]),
+		Some(&["to", "on", "via", "where", "alias", "hidden"]),
 		track_table,
 	) {
+		let to = required(&pragma, "dbt_join", "to");
+		let target = table_by_db_name(schema, rn, to)
+			.unwrap_or_else(|| panic!("#dbt_join(to = \"{to}\"): unknown table"));
+		let alias = optional(&pragma, "alias").map(str::to_owned);
+		let (left_name, left_table) = match optional(&pragma, "via") {
+			Some(via) => {
+				let join = joins
+					.iter()
+					.find(|j| j.alias.as_deref() == Some(via) || j.model == via)
+					.unwrap_or_else(|| panic!("#dbt_join(via = \"{via}\"): no such join"));
+				(via.to_owned(), table_by_db_name(schema, rn, &join.model))
+			}
+			None => (this.clone(), Some(*table)),
+		};
+		let pairs: Vec<(&str, &str)> = required(&pragma, "dbt_join", "on")
+			.split(',')
+			.map(|pair| match pair.split_once('=') {
+				Some((a, b)) => (a.trim(), b.trim()),
+				None => (pair.trim(), pair.trim()),
+			})
+			.collect();
+		let right_name = alias.clone().unwrap_or_else(|| to.to_owned());
+		let mut sql_on = pairs
+			.iter()
+			.map(|(a, b)| format!("${{{left_name}.{a}}} = ${{{right_name}.{b}}}"))
+			.collect::<Vec<_>>()
+			.join(" AND ");
+		if let Some(filter) = optional(&pragma, "where") {
+			sql_on.push_str(&format!(" AND ${{{right_name}.{filter}}}"));
+		}
+		let from = left_table.map_or(Cardinality::Many, |t| {
+			cardinality_by_db_names(t, rn, pairs.iter().map(|(a, _)| *a))
+		});
+		let to = cardinality_by_db_names(target, rn, pairs.iter().map(|(_, b)| *b));
 		joins.push(Join {
-			model: required(&pragma, "dbt_join", "model").to_owned(),
-			alias: optional(&pragma, "alias").map(str::to_owned),
-			sql_on: required(&pragma, "dbt_join", "sql_on").to_owned(),
-			relationship: required(&pragma, "dbt_join", "relationship").to_owned(),
+			model: target.db(rn).raw().to_string(),
+			alias,
+			sql_on,
+			relationship: relationship(from, to).to_owned(),
 			hidden: pragma.contains_key("hidden"),
 		});
 	}
 	joins
+}
+
+fn table_by_db_name<'a>(schema: &'a Schema, rn: &RenameMap, name: &str) -> Option<SchemaTable<'a>> {
+	schema
+		.tables()
+		.map(|table| SchemaTable { schema, table })
+		.find(|t| t.db(rn).raw() == name)
+}
+
+fn cardinality_by_db_names<'a>(
+	table: SchemaTable<'_>,
+	rn: &RenameMap,
+	names: impl Iterator<Item = &'a str>,
+) -> Cardinality {
+	let mut idents = Vec::new();
+	for name in names {
+		match table.columns().find(|c| c.db(rn).raw() == name) {
+			Some(column) => idents.push(column.id()),
+			None => return Cardinality::Many,
+		}
+	}
+	table.cardinality(idents)
 }
 
 fn build_filters(table: &SchemaTable<'_>, track: &mut UsedFields) -> Vec<Filter> {

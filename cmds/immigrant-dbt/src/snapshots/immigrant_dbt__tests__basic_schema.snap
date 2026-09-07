@@ -94,9 +94,14 @@ models:
           - join: "entries"
             alias: "children"
             type: "left"
-            relationship: "one-to-many"
-            sql_on: "${children.extracted_from} = ${fact_case.entry_id}"
+            relationship: "many-to-many"
+            sql_on: "${fact_case.entry_id} = ${children.extracted_from}"
             hidden: true
+          - join: "fact_case_items"
+            alias: "child_items"
+            type: "left"
+            relationship: "one-to-many"
+            sql_on: "${children.entry_id} = ${child_items.entry_id} AND ${child_items.is_best}"
     columns:
       - name: "entry_id"
         description: ""

@@ -29,7 +29,8 @@ enum priority {
 #dbt_column(name = "is_best", type = "BOOLEAN", description = "Latest version of this fact", sql = "row_number() over (partition by t.entry_id order by t.fact_version desc) = 1")
 #dbt_column(name = "valid_to", type = "TIMESTAMPTZ", hidden, sql = "lead(t.created_at) over (partition by t.entry_id order by t.fact_version)")
 #dbt_filter(is_best = "true")
-#dbt_join(model = "entries", alias = "children", hidden, relationship = "one-to-many", sql_on = "${children.extracted_from} = ${fact_case.entry_id}")
+#dbt_join(to = "entries", alias = "children", hidden, on = "entry_id = extracted_from")
+#dbt_join(to = "fact_case_items", via = "children", alias = "child_items", on = "entry_id", where = "is_best")
 table fact_case {
 	entry_id ~.cascade entries;
 	#dbt(hidden)
