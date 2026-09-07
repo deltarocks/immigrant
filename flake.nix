@@ -55,6 +55,7 @@
                 fileset = lib.fileset.unions [
                   (craneLib.fileset.commonCargoSources root)
                   (lib.fileset.fileFilter (file: file.hasExt "schema") root)
+                  (lib.fileset.fileFilter (file: file.hasExt "snap") root)
                 ];
               };
             in
