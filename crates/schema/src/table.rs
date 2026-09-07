@@ -76,7 +76,9 @@ impl Table {
 			..
 		} = mixin;
 		self.docs.extend_from_slice(docs);
-		self.annotations.0.extend_from_slice(&annotations.0);
+		self.annotations
+			.annotations
+			.extend_from_slice(&annotations.annotations);
 		self.columns
 			.extend(columns.iter().map(|c| c.clone_for_mixin()));
 		self.attributes

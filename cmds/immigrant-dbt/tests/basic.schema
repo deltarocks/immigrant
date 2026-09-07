@@ -1,0 +1,65 @@
+scalar entry_id = sql"TEXT";
+scalar plaintext = sql"TEXT" @inline;
+#dbt(skip)
+scalar bytes = sql"BYTEA" @inline;
+scalar created_at = sql"TIMESTAMPTZ" @default(now());
+scalar integer = sql"INTEGER" @inline;
+scalar flag = sql"BOOLEAN" @inline;
+
+// Entry hierarchy
+#pgnc(as_is)
+#dbt(label = "Entries")
+table entries {
+	entry_id @primary_key;
+	// Kind of entry
+	entry_kind: plaintext?;
+	created_at;
+	// Parent entry
+	extracted_from: entry_id? ~.cascade entries(entry_id);
+};
+
+enum priority {
+	a;
+	b;
+};
+
+// Case facts
+#pgnc(as_is)
+#dbt(label = "Case")
+#dbt_column(name = "is_best", type = "BOOLEAN", description = "Latest version of this fact", sql = "row_number() over (partition by t.entry_id order by t.fact_version desc) = 1")
+#dbt_column(name = "valid_to", type = "TIMESTAMPTZ", hidden, sql = "lead(t.created_at) over (partition by t.entry_id order by t.fact_version)")
+#dbt_filter(is_best = "true")
+#dbt_join(model = "entries", alias = "children", hidden, relationship = "one-to-many", sql_on = "${children.extracted_from} = ${fact_case.entry_id}")
+table fact_case {
+	entry_id ~.cascade entries;
+	#dbt(hidden)
+	fact_version: integer;
+	created_at?;
+	// Case name
+	name: plaintext;
+	file: bytes;
+	priority;
+	severity: plaintext @check "severity_check" (_ == "low" || _ == "high");
+	#dbt(skip)
+	secret: plaintext;
+	done: flag @default(false);
+	@primary_key(entry_id, fact_version);
+};
+
+#pgnc(as_is)
+#dbt(label = "Case / Items")
+#dbt_from(sql = "inner join {ref:fact_case} r on r.entry_id = t.entry_id and r.fact_version = t.fact_version")
+#dbt_column(name = "is_best", type = "BOOLEAN", sql = "r.is_best")
+#dbt_filter(is_best = "true", required)
+table fact_case_items {
+	entry_id;
+	fact_version: integer;
+	item: plaintext;
+	@primary_key(entry_id, fact_version, item);
+	(entry_id, fact_version) ~ fact_case(entry_id, fact_version);
+};
+
+#dbt(skip)
+table Runner {
+	runner_id: plaintext @primary_key;
+};

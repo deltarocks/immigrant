@@ -74,6 +74,7 @@
               [
                 cargo-edit
                 just
+                cargo-insta
               ]
               ++ sharedDeps;
           };

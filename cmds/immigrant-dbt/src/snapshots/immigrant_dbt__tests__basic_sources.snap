@@ -1,0 +1,15 @@
+---
+source: cmds/immigrant-dbt/src/main.rs
+expression: sources
+---
+version: 2
+sources:
+  - name: "test"
+    schema: "public"
+    tables:
+      - name: "entries"
+        description: "Entry hierarchy"
+      - name: "fact_case"
+        description: "Case facts"
+      - name: "fact_case_items"
+        description: ""

@@ -1,0 +1,247 @@
+---
+source: cmds/immigrant-dbt/src/main.rs
+expression: schema
+---
+version: 2
+models:
+  - name: "entries"
+    description: "Entry hierarchy"
+    config:
+      meta:
+        label: "Entries"
+        primary_key: "entry_id"
+        metrics:
+          count:
+            type: "count"
+            sql: "${TABLE}.entry_id"
+        joins:
+          - join: "entries"
+            alias: "entries_via_extracted_from"
+            type: "left"
+            relationship: "many-to-one"
+            sql_on: "${entries.extracted_from} = ${entries_via_extracted_from.entry_id}"
+          - join: "entries"
+            alias: "entries_by_extracted_from"
+            type: "left"
+            relationship: "one-to-many"
+            sql_on: "${entries.entry_id} = ${entries_by_extracted_from.extracted_from}"
+          - join: "fact_case"
+            type: "left"
+            relationship: "one-to-many"
+            sql_on: "${entries.entry_id} = ${fact_case.entry_id}"
+    columns:
+      - name: "entry_id"
+        description: ""
+        data_type: "TEXT"
+        config:
+          meta:
+            dimension:
+              type: "string"
+        data_tests:
+          - "not_null"
+          - "unique"
+      - name: "entry_kind"
+        description: "Kind of entry"
+        data_type: "TEXT"
+        config:
+          meta:
+            dimension:
+              type: "string"
+      - name: "created_at"
+        description: ""
+        data_type: "TIMESTAMPTZ"
+        config:
+          meta:
+            dimension:
+              type: "timestamp"
+        data_tests:
+          - "not_null"
+      - name: "extracted_from"
+        description: "Parent entry"
+        data_type: "TEXT"
+        config:
+          meta:
+            dimension:
+              type: "string"
+        data_tests:
+          - relationships:
+              arguments:
+                to: "ref('entries')"
+                field: "entry_id"
+  - name: "fact_case"
+    description: "Case facts"
+    config:
+      meta:
+        label: "Case"
+        primary_key:
+          - "entry_id"
+          - "fact_version"
+        default_filters:
+          - is_best: "true"
+        metrics:
+          count:
+            type: "count"
+            sql: "${TABLE}.entry_id"
+        joins:
+          - join: "entries"
+            type: "left"
+            relationship: "many-to-one"
+            sql_on: "${fact_case.entry_id} = ${entries.entry_id}"
+          - join: "fact_case_items"
+            type: "left"
+            relationship: "one-to-many"
+            sql_on: "${fact_case.entry_id} = ${fact_case_items.entry_id} AND ${fact_case.fact_version} = ${fact_case_items.fact_version}"
+          - join: "entries"
+            alias: "children"
+            type: "left"
+            relationship: "one-to-many"
+            sql_on: "${children.extracted_from} = ${fact_case.entry_id}"
+            hidden: true
+    columns:
+      - name: "entry_id"
+        description: ""
+        data_type: "TEXT"
+        config:
+          meta:
+            dimension:
+              type: "string"
+        data_tests:
+          - "not_null"
+          - relationships:
+              arguments:
+                to: "ref('entries')"
+                field: "entry_id"
+      - name: "fact_version"
+        description: ""
+        data_type: "INTEGER"
+        config:
+          meta:
+            dimension:
+              type: "number"
+              hidden: true
+        data_tests:
+          - "not_null"
+      - name: "created_at"
+        description: ""
+        data_type: "TIMESTAMPTZ"
+        config:
+          meta:
+            dimension:
+              type: "timestamp"
+      - name: "name"
+        description: "Case name"
+        data_type: "TEXT"
+        config:
+          meta:
+            dimension:
+              type: "string"
+        data_tests:
+          - "not_null"
+      - name: "priority"
+        description: "One of: a, b"
+        data_type: "priority"
+        config:
+          meta:
+            dimension:
+              type: "string"
+        data_tests:
+          - "not_null"
+          - accepted_values:
+              arguments:
+                values:
+                  - "a"
+                  - "b"
+      - name: "severity"
+        description: "One of: low, high"
+        data_type: "TEXT"
+        config:
+          meta:
+            dimension:
+              type: "string"
+        data_tests:
+          - "not_null"
+          - accepted_values:
+              arguments:
+                values:
+                  - "low"
+                  - "high"
+      - name: "done"
+        description: ""
+        data_type: "BOOLEAN"
+        config:
+          meta:
+            dimension:
+              type: "boolean"
+        data_tests:
+          - "not_null"
+      - name: "is_best"
+        description: "Latest version of this fact"
+        data_type: "BOOLEAN"
+        config:
+          meta:
+            dimension:
+              type: "boolean"
+      - name: "valid_to"
+        description: ""
+        data_type: "TIMESTAMPTZ"
+        config:
+          meta:
+            dimension:
+              type: "timestamp"
+              hidden: true
+  - name: "fact_case_items"
+    description: ""
+    config:
+      meta:
+        label: "Case / Items"
+        primary_key:
+          - "entry_id"
+          - "fact_version"
+          - "item"
+        default_filters:
+          - is_best: "true"
+            required: true
+        metrics:
+          count:
+            type: "count"
+            sql: "${TABLE}.entry_id"
+        joins:
+          - join: "fact_case"
+            type: "left"
+            relationship: "many-to-one"
+            sql_on: "${fact_case_items.entry_id} = ${fact_case.entry_id} AND ${fact_case_items.fact_version} = ${fact_case.fact_version}"
+    columns:
+      - name: "entry_id"
+        description: ""
+        data_type: "TEXT"
+        config:
+          meta:
+            dimension:
+              type: "string"
+        data_tests:
+          - "not_null"
+      - name: "fact_version"
+        description: ""
+        data_type: "INTEGER"
+        config:
+          meta:
+            dimension:
+              type: "number"
+        data_tests:
+          - "not_null"
+      - name: "item"
+        description: ""
+        data_type: "TEXT"
+        config:
+          meta:
+            dimension:
+              type: "string"
+        data_tests:
+          - "not_null"
+      - name: "is_best"
+        description: ""
+        data_type: "BOOLEAN"
+        config:
+          meta:
+            dimension:
+              type: "boolean"

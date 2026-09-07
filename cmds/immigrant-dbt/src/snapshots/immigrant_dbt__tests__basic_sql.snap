@@ -1,0 +1,30 @@
+---
+source: cmds/immigrant-dbt/src/main.rs
+expression: "sql.join(\"\\n\")"
+---
+select
+	t."entry_id",
+	t."entry_kind",
+	t."created_at",
+	t."extracted_from"
+from {{ source('test', 'entries') }} t
+
+select
+	t."entry_id",
+	t."fact_version",
+	t."created_at",
+	t."name",
+	t."priority",
+	t."severity",
+	t."done",
+	row_number() over (partition by t.entry_id order by t.fact_version desc) = 1 as "is_best",
+	lead(t.created_at) over (partition by t.entry_id order by t.fact_version) as "valid_to"
+from {{ source('test', 'fact_case') }} t
+
+select
+	t."entry_id",
+	t."fact_version",
+	t."item",
+	r.is_best as "is_best"
+from {{ source('test', 'fact_case_items') }} t
+inner join {{ ref('fact_case') }} r on r.entry_id = t.entry_id and r.fact_version = t.fact_version

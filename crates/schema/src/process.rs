@@ -9,7 +9,8 @@ use inflector::{cases::snakecase::to_snake_case, string::pluralize::to_plural};
 use itertools::{Either, Itertools};
 
 use crate::{
-	HasIdent, SchemaComposite, SchemaEnum, SchemaItem, SchemaTable,
+	HasIdent, HasUid as _, SchemaComposite, SchemaEnum, SchemaItem, SchemaTable,
+	annotation::{Tracker, UsedFields},
 	composite::Composite,
 	diagnostics::Report,
 	ids::{DbIdent, Ident},
@@ -58,12 +59,14 @@ impl<T> DerefMut for Pgnc<T> {
 
 impl Pgnc<&mut Schema> {
 	// TODO: Split into merge and renaming phases, so that renames may work with `SchemaItem` instead of raw `Item`?
-	pub fn process_naming(&mut self, rn: &mut RenameMap) {
+	pub fn process_naming(&mut self, rn: &mut RenameMap) -> Tracker {
+		let mut tracker = Tracker::new(["pgnc"]);
+		let track = &mut tracker;
 		for item in self.0.0.iter_mut() {
 			match item {
 				Item::Table(t) => {
 					let mut t = Pgnc(t);
-					t.generate_name(rn);
+					t.generate_name(rn, track);
 					t.generate_column_names(rn);
 					t.merge(rn);
 					t.generate_names(rn);
@@ -86,15 +89,16 @@ impl Pgnc<&mut Schema> {
 				}
 				Item::View(v) => {
 					let c = Pgnc(v);
-					c.generate_name(rn);
+					c.generate_name(rn, track);
 				}
 				Item::Role(r) => {
 					let r = Pgnc(r);
-					r.generate_name(rn);
+					r.generate_name(rn, track);
 				}
 				Item::Mixin(_) => unreachable!("mixins are assimilated"),
 			}
 		}
+		tracker
 	}
 }
 
@@ -179,13 +183,17 @@ fn truncate_auto_name(name: String, suf: &str) -> String {
 ///
 /// Then generate names, i.e for the specified example it will be `table_a_b_c_pk`
 impl Pgnc<&mut Table> {
+	fn tracker<'t>(&self, track: &'t mut Tracker) -> &'t mut UsedFields {
+		track.fields_internal(self.uid(), &self.annotations)
+	}
 	/// Generate name for the table itself
-	pub fn generate_name(&self, rn: &mut RenameMap) {
+	pub fn generate_name(&self, rn: &mut RenameMap, track: &mut Tracker) {
+		let track = self.tracker(track);
 		if self.db_assigned(rn) {
 			return;
 		}
 		let id = self.id().name();
-		let id = if self.annotations.get_single("pgnc", "as_is") == Ok(true) {
+		let id = if self.annotations.get_flag("pgnc", "as_is", track) {
 			id
 		} else {
 			let id = to_snake_case(&id);
@@ -407,12 +415,16 @@ impl Pgnc<&mut Table> {
 }
 
 impl Pgnc<&mut Role> {
-	pub fn generate_name(&self, rn: &mut RenameMap) {
+	fn tracker<'t>(&self, track: &'t mut Tracker) -> &'t mut UsedFields {
+		track.fields_internal(self.uid(), &self.annotations)
+	}
+	pub fn generate_name(&self, rn: &mut RenameMap, track: &mut Tracker) {
+		let track = self.tracker(track);
 		if self.db_assigned(rn) {
 			return;
 		}
 		let id = self.id().name();
-		let id = if self.annotations.get_single("pgnc", "as_is") == Ok(true) {
+		let id = if self.annotations.get_flag("pgnc", "as_is", track) {
 			id
 		} else {
 			to_snake_case(&id)
@@ -460,14 +472,18 @@ impl Pgnc<&mut Composite> {
 }
 
 impl Pgnc<&mut View> {
+	fn tracker<'t>(&self, track: &'t mut Tracker) -> &'t mut UsedFields {
+		track.fields_internal(self.uid(), &self.annotations)
+	}
 	/// Generate name for the table itself
-	pub fn generate_name(&self, rn: &mut RenameMap) {
+	pub fn generate_name(&self, rn: &mut RenameMap, track: &mut Tracker) {
+		let track = self.tracker(track);
 		if self.db_assigned(rn) {
 			return;
 		}
 		let id = self.id().name();
 		// FIXME: Report error on truncation
-		let id = if self.annotations.get_single("pgnc", "as_is") == Ok(true) {
+		let id = if self.annotations.get_flag("pgnc", "as_is", track) {
 			id
 		} else {
 			let id = to_snake_case(&id);

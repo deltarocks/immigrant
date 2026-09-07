@@ -1,0 +1,12 @@
+---
+source: cmds/immigrant-dbt/src/main.rs
+expression: strip_ansi(&err)
+---
+   ┊
+3  │ };
+4  │
+   ·                            ╭───── unsupported attribute field: dbt_join.typo: encountered here
+5  │ #dbt_join(model = "tests", typo = "x", relationship = "one-to-one", sql_on = "1 = 1")
+6  │ table Other {
+7  │     id: sql"INTEGER" @primary_key;
+   ┊

@@ -1,0 +1,8 @@
+table Test {
+	id: sql"INTEGER" @primary_key;
+};
+
+#dbt_join(model = "tests", typo = "x", relationship = "one-to-one", sql_on = "1 = 1")
+table Other {
+	id: sql"INTEGER" @primary_key;
+};

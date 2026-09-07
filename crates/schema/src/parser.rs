@@ -61,7 +61,10 @@ impl S {
 		let ident = TypeIdent::alloc((span, &name));
 		let scalar = Scalar::new(
 			vec!["Inlined scalar".to_owned()],
-			AnnotationList(vec![]),
+			AnnotationList {
+				annotations: vec![],
+				span: SimpleSpan::new(self.id, 0, 0),
+			},
 			TypeDefName::unchecked_new(ident, None),
 			def,
 			vec![ScalarAttribute::Inline],
@@ -279,16 +282,28 @@ rule table_field(s:&S) -> (Column, Option<Scalar>) =
 }
 
 rule annotation_list(s:&S) -> AnnotationList
-= list:annotation(s) ** _ {AnnotationList(list)}
+= p:position!() list:annotation(s) ** _ {
+	AnnotationList{
+		annotations: list,
+		span: SimpleSpan::new(s.id, p as u32, p as u32),
+	}
+}
 rule annotation(s:&S) -> Annotation
 = "#" _ name:code_ident(s) fields:(_ "(" _ f:(f:annotation_field(s)++comma() trailing_comma() {f}) _ ")" {f})? {
 	Annotation {
 		name: name.1.to_owned(),
 		fields: fields.unwrap_or_default(),
+		span: name.0,
 	}
 }
 rule annotation_field(s:&S) -> AnnotationField
-= key:code_ident(s) v:(_ "=" _ value:annotation_value() {value})? {AnnotationField {key: key.1.to_owned(), value: v.unwrap_or(AnnotationValue::Set)}}
+= key:code_ident(s) v:(_ "=" _ value:annotation_value() {value})? {
+	AnnotationField {
+		key: key.1.to_owned(),
+		value: v.unwrap_or(AnnotationValue::Set),
+		span: key.0,
+	}
+}
 rule annotation_value() -> AnnotationValue
 = s:str() {AnnotationValue::String(s.to_owned())}
 
