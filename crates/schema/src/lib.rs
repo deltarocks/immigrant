@@ -8,6 +8,7 @@ use self::{
 	column::Column,
 	composite::Composite,
 	diagnostics::Report,
+	extension::Extension,
 	ids::Ident,
 	index::{Check, Index, PrimaryKey, UniqueConstraint},
 	names::{ItemKind, TypeIdent},
@@ -22,6 +23,7 @@ use self::{
 
 pub mod column;
 pub mod composite;
+pub mod extension;
 pub mod index;
 pub mod mixin;
 pub mod process;
@@ -550,6 +552,52 @@ impl HasDefaultDbName for SchemaRole<'_> {
 }
 derive_is_isomorph_by_id_name!(SchemaRole<'_>);
 impl IsCompatible for SchemaRole<'_> {
+	fn is_compatible(
+		&self,
+		_new: &Self,
+		_rn: &RenameMap,
+		_report_self: &mut Report,
+		_report_new: &mut Report,
+	) -> bool {
+		true
+	}
+}
+
+#[derive(Clone, Copy, Derivative)]
+#[derivative(Debug)]
+pub struct SchemaExtension<'a> {
+	#[derivative(Debug = "ignore")]
+	pub schema: &'a Schema,
+	pub extension: &'a Extension,
+}
+impl Deref for SchemaExtension<'_> {
+	type Target = Extension;
+
+	fn deref(&self) -> &Self::Target {
+		self.extension
+	}
+}
+impl HasUid for SchemaExtension<'_> {
+	fn uid(&self) -> uid::Uid {
+		self.extension.uid()
+	}
+}
+impl HasIdent for SchemaExtension<'_> {
+	type Kind = names::ExtensionKind;
+
+	fn id(&self) -> Ident<Self::Kind> {
+		self.extension.id()
+	}
+}
+impl HasDefaultDbName for SchemaExtension<'_> {
+	type Kind = names::ExtensionKind;
+
+	fn default_db(&self) -> Option<DbIdent<Self::Kind>> {
+		self.extension.default_db()
+	}
+}
+derive_is_isomorph_by_id_name!(SchemaExtension<'_>);
+impl IsCompatible for SchemaExtension<'_> {
 	fn is_compatible(
 		&self,
 		_new: &Self,

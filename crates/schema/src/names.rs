@@ -36,6 +36,7 @@ def_kind!(
 	TriggerKind(9),
 	RoleKind(10),
 	PolicyKind(11),
+	ExtensionKind(12),
 	UnknownKind(20),
 );
 
@@ -105,6 +106,7 @@ pub type TypeDefName = DefName<TypeKind>;
 pub type EnumItemDefName = DefName<EnumItemKind>;
 pub type CompositeItemDefName = DefName<FieldKind>;
 pub type RoleDefName = DefName<RoleKind>;
+pub type ExtensionDefName = DefName<ExtensionKind>;
 
 pub type TableIdent = Ident<TableKind>;
 pub type ViewIdent = Ident<ViewKind>;
@@ -114,6 +116,7 @@ pub type TypeIdent = Ident<TypeKind>;
 pub type FieldIdent = Ident<FieldKind>;
 pub type MixinIdent = Ident<MixinKind>;
 pub type RoleIdent = Ident<RoleKind>;
+pub type ExtensionIdent = Ident<ExtensionKind>;
 
 pub type DbTable = DbIdent<TableKind>;
 pub type DbView = DbIdent<ViewKind>;
@@ -129,3 +132,4 @@ pub type DbNativeType = DbIdent<NativeTypeKind>;
 pub type DbItem = DbIdent<ItemKind>;
 pub type DbRole = DbIdent<RoleKind>;
 pub type DbPolicy = DbIdent<PolicyKind>;
+pub type DbExtension = DbIdent<ExtensionKind>;

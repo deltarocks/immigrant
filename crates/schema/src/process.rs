@@ -13,6 +13,7 @@ use crate::{
 	annotation::{Tracker, UsedFields},
 	composite::Composite,
 	diagnostics::Report,
+	extension::Extension,
 	ids::{DbIdent, Ident},
 	index::{Check, Index, PrimaryKey, UniqueConstraint},
 	role::Role,
@@ -94,6 +95,10 @@ impl Pgnc<&mut Schema> {
 				Item::Role(r) => {
 					let r = Pgnc(r);
 					r.generate_name(rn, track);
+				}
+				Item::Extension(e) => {
+					let e = Pgnc(e);
+					e.generate_name(rn);
 				}
 				Item::Mixin(_) => unreachable!("mixins are assimilated"),
 			}
@@ -433,6 +438,16 @@ impl Pgnc<&mut Role> {
 	}
 }
 
+impl Pgnc<&mut Extension> {
+	fn generate_name(&self, rn: &mut RenameMap) {
+		if self.db_assigned(rn) {
+			return;
+		}
+		let id = self.id().name();
+		self.set_db(rn, DbIdent::new(&id));
+	}
+}
+
 impl Pgnc<&mut Enum> {
 	fn generate_name(&self, rn: &mut RenameMap) {
 		if self.db_assigned(rn) {
@@ -544,6 +559,10 @@ pub fn check_unique_identifiers(schema: &Schema, diagnostics: &mut Report) {
 	let seen_roles = &mut HashSet::new();
 	for role in schema.roles() {
 		check_unique(seen_roles, role.id().to_unknown(), diagnostics);
+	}
+	let seen_extensions = &mut HashSet::new();
+	for extension in schema.extensions() {
+		check_unique(seen_extensions, extension.id().to_unknown(), diagnostics);
 	}
 	let seen = &mut HashSet::new();
 	for item in &schema.items() {

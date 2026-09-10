@@ -10,12 +10,14 @@ use crate::{
 	column::{Column, ColumnAttribute, PartialForeignKey},
 	composite::{Composite, CompositeAttribute, Field, FieldAttribute},
 	diagnostics::Report,
+	extension::{Extension, ExtensionAttribute},
 	ids::{DbIdent, in_allocator},
 	index::{Check, Index, OpClass, PrimaryKey, UniqueConstraint, Using, With},
 	mixin::Mixin,
 	names::{
-		ColumnIdent, DbProcedure, DefName, EnumItemDefName, FieldIdent, MixinIdent, RoleDefName,
-		RoleIdent, TableDefName, TableIdent, TypeDefName, TypeIdent, ViewDefName,
+		ColumnIdent, DbProcedure, DefName, EnumItemDefName, ExtensionDefName, FieldIdent,
+		MixinIdent, RoleDefName, RoleIdent, TableDefName, TableIdent, TypeDefName, TypeIdent,
+		ViewDefName,
 	},
 	role::{Permission, Policy, Role, RoleAttribute, RoleGrant},
 	root::{Item, Schema, SchemaProcessOptions},
@@ -91,6 +93,7 @@ rule item(s:&S) -> (Item, Vec<Scalar>)
 / t:composite(s) {(Item::Composite(t), vec![])}
 / t:mixin(s) {(Item::Mixin(t.0), t.1)}
 / t:role(s) {(Item::Role(t), vec![])}
+/ t:extension(s) {(Item::Extension(t), vec![])}
 
 rule mixin(s:&S) -> (Mixin, Vec<Scalar>) =
 	docs:docs()
@@ -144,6 +147,18 @@ rule role(s:&S) -> Role =
 		attributes:(a:role_attribute(s) _ ";" {a})**_ _
 	"}" _ ";" {
 	Role::new(docs, annotations, RoleDefName::alloc(name), attributes)
+};
+rule extension_attribute(s:&S) -> ExtensionAttribute
+= "version" _ v:str() {ExtensionAttribute::Version(v.to_owned())}
+/ "cascade" {ExtensionAttribute::Cascade}
+/ "@external" {ExtensionAttribute::External}
+rule extension(s:&S) -> Extension =
+	docs:docs()
+	annotations:annotation_list(s) _
+	"extension" _ name:def_name(s) _
+		attributes:("{" _ a:(a:extension_attribute(s) _ ";" {a})**_ _ "}" _ {a})?
+	";" {
+	Extension::new(docs, annotations, ExtensionDefName::alloc(name), attributes.unwrap_or_default())
 };
 rule permission() -> Permission
 = "select" {Permission::Select}

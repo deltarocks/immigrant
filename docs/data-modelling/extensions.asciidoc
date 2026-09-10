@@ -1,0 +1,58 @@
+= Extensions
+:order: 7
+
+[source,immigrant]
+----
+extension vector;
+extension uuid_ossp "uuid-ossp";
+extension vchord { cascade; };
+extension postgis { version "3.4.2"; };
+----
+
+== Generated SQL
+
+[cols="1,2"]
+|===
+| Change | SQL
+
+| extension added
+| `CREATE EXTENSION "name" [VERSION 'v'] [CASCADE];`
+
+| `version` changed from one value to another
+| `ALTER EXTENSION "name" UPDATE TO 'v';`
+
+| `version` added or removed
+| nothing; the pin only affects future `CREATE EXTENSION`
+
+| `cascade` changed
+| nothing; only affects `CREATE EXTENSION`
+
+| extension removed
+| `DROP EXTENSION "name";`
+
+| database name changed
+| error, PostgreSQL has no rename for extensions
+|===
+
+Extensions are created before roles are granted and before any type, table or view, and dropped after all of them, in reverse declaration order. `DROP EXTENSION` is emitted without `CASCADE`: if a column or index still depends on the extension, PostgreSQL refuses, which is the safe default.
+
+== Attributes
+
+=== version
+
+Pins the extension version. Passed as `VERSION` on create; a change between two pinned versions becomes `ALTER EXTENSION ... UPDATE TO`.
+
+=== cascade
+
+Adds `CASCADE` to `CREATE EXTENSION`, installing extensions the declared one depends on (e.g. `vchord` requires `vector`). Prefer declaring dependencies explicitly when the schema also uses their types directly.
+
+=== @external
+
+Marks an extension that exists outside of the schema (preinstalled by the provider or managed by an operator). Immigrant never creates, updates or drops it, but the declaration documents the dependency:
+
+[source,immigrant]
+----
+extension vector { @external; };
+
+scalar embedding = sql"VECTOR(1024)";
+----

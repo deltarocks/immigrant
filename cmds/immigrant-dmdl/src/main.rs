@@ -115,6 +115,7 @@ fn main() -> anyhow::Result<()> {
 			Item::Composite(_) => {}
 			Item::View(_) => {}
 			Item::Role(_) => {}
+			Item::Extension(_) => {}
 			Item::Mixin(_) => unreachable!("mixins are assimilated"),
 		}
 	}

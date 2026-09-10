@@ -7,9 +7,9 @@ use std::{
 use itertools::Itertools;
 use schema::{
 	ChangeList, ColumnDiff, Diff, EnumDiff, HasDefaultDbName, HasIdent, HasUid, IsCompatible,
-	IsIsomorph, SchemaComposite, SchemaDiff, SchemaEnum, SchemaItem, SchemaRole, SchemaScalar,
-	SchemaSql, SchemaTable, SchemaTableOrView, SchemaType, SchemaView, TableCheck, TableColumn,
-	TableDiff, TableForeignKey, TableIndex, TablePolicy, TablePrimaryKey, TableSql,
+	IsIsomorph, SchemaComposite, SchemaDiff, SchemaEnum, SchemaExtension, SchemaItem, SchemaRole,
+	SchemaScalar, SchemaSql, SchemaTable, SchemaTableOrView, SchemaType, SchemaView, TableCheck,
+	TableColumn, TableDiff, TableForeignKey, TableIndex, TablePolicy, TablePrimaryKey, TableSql,
 	TableUniqueConstraint,
 	diagnostics::Report,
 	ids::{DbIdent, Ident},
@@ -836,6 +836,32 @@ impl Pg<SchemaRole<'_>> {
 	}
 }
 
+impl Pg<SchemaExtension<'_>> {
+	pub fn create(&self, sql: &mut String, rn: &RenameMap) {
+		let name = Id(self.db(rn));
+		w!(sql, "CREATE EXTENSION {name}");
+		if let Some(version) = self.version() {
+			w!(sql, " VERSION '{}'", version.replace('\'', "''"));
+		}
+		if self.cascade() {
+			w!(sql, " CASCADE");
+		}
+		wl!(sql, ";");
+	}
+	pub fn update(&self, to: &str, sql: &mut String, rn: &RenameMap) {
+		let name = Id(self.db(rn));
+		wl!(
+			sql,
+			"ALTER EXTENSION {name} UPDATE TO '{}';",
+			to.replace('\'', "''")
+		);
+	}
+	pub fn drop(&self, sql: &mut String, rn: &RenameMap) {
+		let name = Id(self.db(rn));
+		wl!(sql, "DROP EXTENSION {name};");
+	}
+}
+
 impl IsIsomorph for Pg<TablePolicy<'_>> {
 	fn is_isomorph(
 		&self,
@@ -1020,6 +1046,48 @@ impl Pg<SchemaDiff<'_>> {
 				continue;
 			}
 			Pg(*role).create(sql, rn);
+		}
+
+		let old_extensions = self.old.schema_extensions();
+		let new_extensions = self.new.schema_extensions();
+		let extension_changes = mk_change_list(
+			rn,
+			&old_extensions,
+			&new_extensions,
+			|v| v,
+			report_old,
+			report_new,
+		);
+		for ele in extension_changes.renamed {
+			match ele {
+				RenameOp::Rename(_, _, e) | RenameOp::Restore(_, _, e) => {
+					report_new
+						.error("extensions can't be renamed")
+						.annotate("renamed here", e.id().span());
+				}
+				RenameOp::Store(e, _) | RenameOp::Moveaway(e, _) => {
+					report_old
+						.error("extensions can't be renamed")
+						.annotate("renamed here", e.id().span());
+				}
+			}
+		}
+		for extension in &extension_changes.created {
+			if extension.is_external() {
+				continue;
+			}
+			Pg(*extension).create(sql, rn);
+		}
+		for ele in &extension_changes.updated {
+			if ele.new.is_external() {
+				continue;
+			}
+			let (Some(old), Some(new)) = (ele.old.version(), ele.new.version()) else {
+				continue;
+			};
+			if old != new {
+				Pg(ele.new).update(new, sql, rn);
+			}
 		}
 
 		// Rename/moveaway everything
@@ -1403,6 +1471,13 @@ impl Pg<SchemaDiff<'_>> {
 				}
 			}
 		};
+
+		for extension in extension_changes.dropped.iter().rev() {
+			if extension.is_external() {
+				continue;
+			}
+			Pg(*extension).drop(sql, rn);
+		}
 
 		for role in &role_changes.dropped {
 			if role.is_external() {

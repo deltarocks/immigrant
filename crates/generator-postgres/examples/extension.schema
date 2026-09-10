@@ -1,0 +1,54 @@
+!!!SETUP
+scalar i32 = sql"INTEGER";
+!!!TEST
+extension vector;
+extension uuid_ossp "uuid-ossp" { version "1.1"; };
+extension vchord { cascade; };
+
+scalar embedding = sql"VECTOR(3)";
+table Doc {
+	i32;
+	embedding;
+};
+!!!UPDATE
+extension vector;
+extension uuid_ossp "uuid-ossp" { version "1.2"; };
+extension vchord { cascade; };
+
+scalar embedding = sql"VECTOR(3)";
+table Doc {
+	i32;
+	embedding;
+};
+!!!UPDATE
+extension vector;
+extension uuid_ossp "uuid-ossp" { version "1.2"; };
+
+scalar embedding = sql"VECTOR(3)";
+table Doc {
+	i32;
+	embedding;
+};
+!!!RESULT
+-- updated: setup --
+CREATE DOMAIN i32 AS INTEGER;
+-- updated --
+CREATE EXTENSION vector;
+CREATE EXTENSION "uuid-ossp" VERSION '1.1';
+CREATE EXTENSION vchord CASCADE;
+CREATE DOMAIN embedding AS VECTOR(3);
+CREATE TABLE docs (
+	i32 i32 NOT NULL
+,	embedding embedding NOT NULL
+);
+-- updated --
+ALTER EXTENSION "uuid-ossp" UPDATE TO '1.2';
+-- updated --
+DROP EXTENSION vchord;
+-- updated: cleanup schema changes --
+DROP TABLE docs;
+DROP DOMAIN embedding;
+DROP EXTENSION "uuid-ossp";
+DROP EXTENSION vector;
+-- updated: cleanup setup --
+DROP DOMAIN i32;

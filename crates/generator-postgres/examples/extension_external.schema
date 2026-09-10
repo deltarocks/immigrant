@@ -1,0 +1,15 @@
+!!!TEST
+extension vector { @external; };
+
+scalar embedding = sql"VECTOR(3)";
+!!!UPDATE
+extension vector { @external; version "0.8.1"; };
+
+scalar embedding = sql"VECTOR(3)";
+!!!RESULT
+-- updated --
+CREATE DOMAIN embedding AS VECTOR(3);
+-- updated --
+
+-- updated: cleanup schema changes --
+DROP DOMAIN embedding;

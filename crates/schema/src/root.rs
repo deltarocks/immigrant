@@ -9,10 +9,11 @@ use super::{
 	table::Table,
 };
 use crate::{
-	HasIdent, SchemaComposite, SchemaEnum, SchemaItem, SchemaRole, SchemaScalar, SchemaSql,
-	SchemaTable, SchemaTableOrView, SchemaType, SchemaView,
+	HasIdent, SchemaComposite, SchemaEnum, SchemaExtension, SchemaItem, SchemaRole, SchemaScalar,
+	SchemaSql, SchemaTable, SchemaTableOrView, SchemaType, SchemaView,
 	composite::Composite,
 	diagnostics::Report,
+	extension::Extension,
 	ids::Ident,
 	mixin::Mixin,
 	names::{DbNativeType, DbTable, DbType, RoleIdent, TableIdent, TypeIdent},
@@ -43,6 +44,8 @@ pub enum Item {
 	View(View),
 	#[derivative(Debug = "transparent")]
 	Role(Role),
+	#[derivative(Debug = "transparent")]
+	Extension(Extension),
 }
 impl Item {
 	pub fn is_table(&self) -> bool {
@@ -120,6 +123,12 @@ impl Item {
 			_ => None,
 		}
 	}
+	pub fn as_extension(&self) -> Option<&Extension> {
+		match self {
+			Self::Extension(value) => Some(value),
+			_ => None,
+		}
+	}
 }
 
 pub struct SchemaProcessOptions {
@@ -140,6 +149,7 @@ impl Schema {
 	) {
 		self.0.sort_by_key(|i| match i {
 			Item::Role(_) => 0,
+			Item::Extension(_) => 0,
 			Item::Table(_) => 1,
 			Item::Enum(_) => 0,
 			Item::Scalar(_) => 9997,
@@ -361,6 +371,7 @@ impl Schema {
 					}),
 					Item::View(view) => SchemaItem::View(SchemaView { schema: self, view }),
 					Item::Role(_) => return None,
+					Item::Extension(_) => return None,
 					Item::Mixin(_) => unreachable!("mixins are assimilted at the earliest stage"),
 				})
 			})
@@ -436,6 +447,17 @@ impl Schema {
 		self.roles()
 			.find(|r| r.id() == name)
 			.map(|role| SchemaRole { schema: self, role })
+	}
+	pub fn extensions(&self) -> impl Iterator<Item = &Extension> {
+		self.0.iter().filter_map(Item::as_extension)
+	}
+	pub fn schema_extensions(&self) -> Vec<SchemaExtension<'_>> {
+		self.extensions()
+			.map(|extension| SchemaExtension {
+				schema: self,
+				extension,
+			})
+			.collect()
 	}
 
 	pub fn schema_table(&self, name: &TableIdent) -> Option<SchemaTable<'_>> {
