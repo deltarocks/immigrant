@@ -406,8 +406,22 @@ impl Pg<ColumnDiff<'_>> {
 	) {
 		let name = Id(self.new.db(rn));
 		let new_ty = self.new.db_type(rn, report_new);
-		if self.old.db_type(rn, report_old) != new_ty {
-			if let Some(initialize_as) = self.new.initialize_as() {
+		let type_changed = self.old.db_type(rn, report_old) != new_ty;
+		let old_default = self.old.default();
+		let new_default = self.new.default();
+		let recast_via_text = type_changed
+			&& self.new.initialize_as().is_none()
+			&& matches!(self.new.ty(), SchemaType::Enum(_));
+		if recast_via_text && old_default.is_some() {
+			out.push(alt_group!("ALTER COLUMN {name} DROP DEFAULT"));
+		}
+		if type_changed {
+			if recast_via_text {
+				out.push(alt_group!(
+					"ALTER COLUMN {name} SET DATA TYPE {ty} USING {name}::text::{ty}",
+					ty = new_ty.raw()
+				));
+			} else if let Some(initialize_as) = self.new.initialize_as() {
 				let sql = format_sql(
 					initialize_as,
 					self.new.table.schema,
@@ -435,18 +449,17 @@ impl Pg<ColumnDiff<'_>> {
 			}
 		}
 
-		let old_default = self.old.default();
-		let new_default = self.new.default();
 		match (old_default, new_default) {
 			(None, Some(new_default)) => out.push(alt_group!(
 				"ALTER COLUMN {name} SET DEFAULT {}",
 				Pg(self.new.table).format_sql(new_default, rn, report_new)
 			)),
+			(Some(_), None) if recast_via_text => {}
 			(Some(_), None) => out.push(alt_group!("ALTER COLUMN {name} DROP DEFAULT")),
 			(Some(old_default), Some(new_default)) => {
 				let old_default = Pg(self.old.table).format_sql(old_default, rn, report_old);
 				let new_default = Pg(self.new.table).format_sql(new_default, rn, report_new);
-				if new_default != old_default {
+				if recast_via_text || new_default != old_default {
 					out.push(alt_group!("ALTER COLUMN {name} SET DEFAULT {new_default}",));
 				}
 			}
@@ -2250,7 +2263,9 @@ impl IsCompatible for PgTableConstraint<'_> {
 				let b_source_columns = b.source_db_columns(rn);
 				let a_target_columns = a.target_db_columns(rn);
 				let b_target_columns = b.target_db_columns(rn);
-				a_source_columns == b_source_columns && a_target_columns == b_target_columns
+				a_source_columns == b_source_columns
+					&& a_target_columns == b_target_columns
+					&& a.db_types(rn, report_self) == b.db_types(rn, report_new)
 			}
 			_ => unreachable!("non-isomorphs are rejected"),
 		}

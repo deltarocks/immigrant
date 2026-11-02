@@ -1,0 +1,84 @@
+!!!TEST enum used by a table
+enum kind "kind" {
+	a;
+	b;
+	c;
+};
+table Item {
+	k: kind;
+};
+!!!UPDATE enum value is dropped, column is recast through text
+enum kind "kind" {
+	a;
+	c;
+};
+table Item {
+	k: kind;
+};
+!!!UPDATE enum is a key referenced by a foreign key
+enum kind "kind" {
+	a;
+	c;
+};
+table Item {
+	k: kind @primary_key;
+};
+table Usage {
+	k: kind ~ Item;
+};
+!!!UPDATE referenced enum value is dropped, foreign key is recreated around the recast
+enum kind "kind" {
+	a;
+};
+table Item {
+	k: kind @primary_key;
+};
+table Usage {
+	k: kind ~ Item;
+};
+!!!RESULT
+-- updated: enum used by a table --
+CREATE TYPE kind AS ENUM (
+	'a'
+,	'b'
+,	'c'
+);
+
+CREATE TABLE items (
+	k kind NOT NULL
+);
+-- updated: enum value is dropped, column is recast through text --
+ALTER TYPE kind
+	RENAME TO moveaway_1
+;
+CREATE TYPE kind AS ENUM (
+	'a'
+,	'c'
+);
+
+ALTER TABLE items ALTER COLUMN k SET DATA TYPE kind USING k::text::kind;
+DROP TYPE moveaway_1;
+-- updated: enum is a key referenced by a foreign key --
+CREATE TABLE usages (
+	k kind NOT NULL
+);
+ALTER TABLE items ADD CONSTRAINT items_k_pkey PRIMARY KEY(k);
+ALTER TABLE usages ADD CONSTRAINT usages_k_fk FOREIGN KEY(k) REFERENCES items(k);
+-- updated: referenced enum value is dropped, foreign key is recreated around the recast --
+ALTER TYPE kind
+	RENAME TO moveaway_1
+;
+CREATE TYPE kind AS ENUM (
+	'a'
+);
+
+ALTER TABLE usages DROP CONSTRAINT usages_k_fk;
+ALTER TABLE items ALTER COLUMN k SET DATA TYPE kind USING k::text::kind;
+ALTER TABLE usages ALTER COLUMN k SET DATA TYPE kind USING k::text::kind;
+ALTER TABLE usages ADD CONSTRAINT usages_k_fk FOREIGN KEY(k) REFERENCES items(k);
+DROP TYPE moveaway_1;
+-- updated: cleanup schema changes --
+ALTER TABLE usages DROP CONSTRAINT usages_k_fk;
+DROP TABLE items;
+DROP TABLE usages;
+DROP TYPE kind;
