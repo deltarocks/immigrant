@@ -1,0 +1,25 @@
+{
+	"name": "@deltarocks/immigrant",
+	"license": "MIT",
+	"version": "0.2.0",
+	"scripts": {
+		"wasmbuild": "deno run -A scripts/build.ts -p immigrant-web --skip-opt",
+		"prepack": "deno task wasmbuild && pnpm-prepare"
+	},
+	"dependencies": {
+		"@std/assert": "jsr:^1.0.19"
+	},
+	"devDependencies": {
+		"@std/testing": "jsr:^1.0.21",
+		"@deno/wasmbuild": "jsr:^0.23.0",
+		"pnpm-prepare": "link:../../../../contrib/pnpm-prepare"
+	},
+	"exports": {
+		".": "./mod.ts",
+		"./builder": "./builder.ts"
+	},
+	"publishConfig": {
+		"directory": "dist",
+		"linkDirectory": false
+	}
+}
