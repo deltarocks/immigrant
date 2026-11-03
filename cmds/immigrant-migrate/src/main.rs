@@ -6,7 +6,10 @@ use std::{env, env::current_dir, fs};
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use cli::{current_schema, display_reports, generate_sql, generate_sql_nowrite, stored_schema};
+use cli::{
+	NonDestructiveMode, configure_non_destructive, current_schema, display_reports, generate_sql,
+	generate_sql_nowrite, stored_schema,
+};
 use diesel::sql_query;
 use diesel::sql_types::{Integer, Nullable, Text};
 use diesel_async::{
@@ -43,6 +46,10 @@ enum Subcommand {
 		/// will only be checked.
 		#[clap(long)]
 		write: bool,
+		/// Prevent data loss: `fail` refuses to drop tables and columns, `keep` renames them to
+		/// `obsolete_<id>_<name>` using the new migration id, any other value is used as the id.
+		#[clap(long)]
+		non_destructive: Option<NonDestructiveMode>,
 	},
 	/// Execute migrations
 	Apply,
@@ -220,10 +227,10 @@ async fn main() -> Result<()> {
 	}
 	let id = list.last().map(|(id, _, _)| id.id + 1).unwrap_or_default();
 
-	let (original_str, original, mut original_report, orig_rn) =
+	let (original_sources, original, mut original_report, orig_rn) =
 		stored_schema(&list).context("failed to load past migrations")?;
 
-	let (current_str, current, mut current_report, current_rn) =
+	let (current_sources, current, mut current_report, current_rn) =
 		current_schema(&root).context("failed to parse current schema")?;
 
 	let mut rn = orig_rn;
@@ -239,10 +246,10 @@ async fn main() -> Result<()> {
 				None,
 				None,
 				None,
-				current_str.clone(),
+				current_sources.clone(),
 			);
 
-			migration.to_diff(original_str.clone())?;
+			migration.to_diff(&original_sources)?;
 
 			if !migration.is_noop() {
 				bail!("Dirty database schema, not applying");
@@ -260,6 +267,7 @@ async fn main() -> Result<()> {
 			before_down_sql,
 			after_down_sql,
 			write,
+			non_destructive,
 		} => {
 			let should_use_editor = message.is_none();
 
@@ -278,14 +286,16 @@ async fn main() -> Result<()> {
 				after_up_sql,
 				before_down_sql,
 				after_down_sql,
-				current_str.clone(),
+				current_sources.clone(),
 			);
+			let fail_on_data_loss =
+				configure_non_destructive(&mut migration, non_destructive.as_ref(), id.id);
 
 			if should_use_editor {
 				bail!("$EDITOR usage is not yet supported")
 			}
 
-			migration.to_diff(original_str.clone())?;
+			migration.to_diff(&original_sources)?;
 
 			if migration.is_noop() {
 				println!("No changes found");
@@ -298,18 +308,14 @@ async fn main() -> Result<()> {
 
 			let (sql, _) = generate_sql_nowrite(
 				&migration,
+				fail_on_data_loss,
 				&original,
 				&current,
 				&rn,
 				&mut original_report,
 				&mut current_report,
 			)?;
-			if display_reports(
-				&original_str,
-				&current_str,
-				original_report.clone(),
-				current_report.clone(),
-			) {
+			if display_reports(original_report.clone(), current_report.clone()) {
 				bail!("errors are reported, cannot continue");
 			}
 			if let Err(e) = run_migrations(
@@ -351,8 +357,7 @@ async fn main() -> Result<()> {
 			if !opts.dry_run || write {
 				generate_sql(
 					&migration,
-					&original_str,
-					&current_str,
+					fail_on_data_loss,
 					&original,
 					&current,
 					&rn,

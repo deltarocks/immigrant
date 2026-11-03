@@ -19,8 +19,8 @@ fn validate_db<T: RenameExt>(v: &T, rn: &RenameMap) {
 	);
 }
 
-pub fn validate(_code: &str, schema: &Schema, rn: &RenameMap) {
-	for ele in schema.items() {
+pub fn validate(schema: &Schema, rn: &RenameMap) {
+	for ele in schema.items().into_iter().filter(|i| !i.is_stub()) {
 		validate_db(&ele, rn);
 		match ele {
 			schema::SchemaItem::Table(t) => {
@@ -77,7 +77,7 @@ pub fn validate(_code: &str, schema: &Schema, rn: &RenameMap) {
 			schema::SchemaItem::View(_) => {}
 		}
 	}
-	for role in schema.roles() {
+	for role in schema.schema_roles().into_iter().filter(|r| !r.is_stub()) {
 		validate_db(&role, rn);
 	}
 }

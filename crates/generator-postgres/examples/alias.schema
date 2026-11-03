@@ -1,0 +1,106 @@
+!!!TEST aliases resolve to definitions
+scalar user_id = sql"INTEGER";
+role User {
+	default {
+		select;
+	};
+};
+@mixin Timestamps {
+	created_at: sql"TIMESTAMP";
+};
+alias uid = user_id;
+alias Person = User;
+alias Stamped = Timestamps;
+alias Account = Users;
+table Users {
+	@mixin Stamped;
+	uid @primary_key;
+};
+table Posts {
+	author: uid ~ Account(uid);
+	editor: uid @policy.for(Person) "own" (_ == current_setting("app.uid")::uid);
+	@role Person {
+		insert;
+	};
+	@rls;
+};
+view AccountView = sql"SELECT {Account.uid} FROM {Account}";
+!!!UPDATE same schema without aliases
+scalar user_id = sql"INTEGER";
+role User {
+	default {
+		select;
+	};
+};
+@mixin Timestamps {
+	created_at: sql"TIMESTAMP";
+};
+table Users {
+	@mixin Timestamps;
+	uid: user_id @primary_key;
+};
+table Posts {
+	author: user_id ~ Users(uid);
+	editor: user_id @policy.for(User) "own" (_ == current_setting("app.uid")::user_id);
+	@role User {
+		insert;
+	};
+	@rls;
+};
+view AccountView = sql"SELECT {Users.uid} FROM {Users}";
+!!!UPDATE alias chains, declared after use
+scalar user_id = sql"INTEGER";
+role User {
+	default {
+		select;
+	};
+};
+@mixin Timestamps {
+	created_at: sql"TIMESTAMP";
+};
+table Users {
+	@mixin Timestamps;
+	uid @primary_key;
+};
+table Posts {
+	author: id ~ Users(uid);
+	editor: user_id @policy.for(User) "own" (_ == current_setting("app.uid")::id);
+	@role User {
+		insert;
+	};
+	@rls;
+};
+view AccountView = sql"SELECT {Users.uid} FROM {Users}";
+alias id = uid;
+alias uid = user_id;
+!!!RESULT
+-- updated: aliases resolve to definitions --
+CREATE ROLE "user";
+CREATE DOMAIN user_id AS INTEGER;
+CREATE TABLE users (
+	uid user_id NOT NULL
+,	created_at TIMESTAMP NOT NULL
+,	CONSTRAINT users_uid_pkey PRIMARY KEY(uid)
+);
+GRANT SELECT ON users TO "user";
+CREATE TABLE posts (
+	author user_id NOT NULL
+,	editor user_id NOT NULL
+);
+ALTER TABLE posts ENABLE ROW LEVEL SECURITY;
+GRANT INSERT ON posts TO "user";
+CREATE POLICY own ON posts FOR ALL TO "user" USING (editor = (current_setting('app.uid'))::user_id);
+CREATE VIEW account_views WITH (security_invoker = true) AS SELECT uid FROM users;
+GRANT SELECT ON account_views TO "user";
+ALTER TABLE posts ADD CONSTRAINT posts_author_fk FOREIGN KEY(author) REFERENCES users(uid);
+-- updated: same schema without aliases --
+
+-- updated: alias chains, declared after use --
+
+-- updated: cleanup schema changes --
+DROP VIEW account_views;
+ALTER TABLE posts DROP CONSTRAINT posts_author_fk;
+DROP TABLE users;
+DROP TABLE posts;
+DROP DOMAIN user_id;
+DROP ROLE "user";

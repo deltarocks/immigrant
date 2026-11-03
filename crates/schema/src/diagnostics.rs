@@ -4,6 +4,8 @@ use hi_doc::{Formatting, SnippetBuilder, Text};
 use tree_sitter_highlight::HighlightConfiguration;
 
 use crate::span::SimpleSpan;
+#[cfg(feature = "hi-doc")]
+use crate::span::SourceId;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum Severity {
@@ -54,33 +56,44 @@ impl Report {
 		Self::default()
 	}
 	#[cfg(feature = "hi-doc")]
-	pub fn to_hi_doc(self, src: &str) -> Vec<hi_doc::Source> {
+	pub fn to_hi_doc(self) -> Vec<hi_doc::Source> {
 		let mut out = Vec::new();
 
-		let mut snippet_src = src.to_owned();
-		// For missing something at the end of input - create real character to point at
-		snippet_src.push(' ');
-
 		for part in self.parts {
-			let mut builder = SnippetBuilder::new(&snippet_src);
-			#[cfg(feature = "tree-sitter-highlight")]
-			highlight(&mut builder);
-
-			// TODO: other severity
+			let mut by_source: Vec<(SourceId, Vec<Label>)> = Vec::new();
 			for ele in part.annotations {
-				let mut ann = builder.error(Text::fragment(
-					format!("{}: {}", part.msg, ele.msg),
-					Formatting::rgb([127, 127, 255]),
-				));
-				if ele.span.start == ele.span.end {
-					// FIXME: They shouldn't be inclusive by default
-					ann = ann.range(ele.span.start as usize..=ele.span.end as usize);
-				} else {
-					ann = ann.range(ele.span.start as usize..=ele.span.end as usize - 1);
+				let source = ele.span.source();
+				match by_source.iter_mut().find(|(s, _)| *s == source) {
+					Some((_, labels)) => labels.push(ele),
+					None => by_source.push((source, vec![ele])),
 				}
-				ann.build();
 			}
-			out.push(builder.build())
+			for (source, labels) in by_source {
+				let mut snippet_src = source.text();
+				// For missing something at the end of input - create real character to point at
+				snippet_src.push(' ');
+
+				let mut builder =
+					SnippetBuilder::new(&snippet_src).with_file_name(source.path(), None);
+				#[cfg(feature = "tree-sitter-highlight")]
+				highlight(&mut builder);
+
+				// TODO: other severity
+				for ele in labels {
+					let mut ann = builder.error(Text::fragment(
+						format!("{}: {}", part.msg, ele.msg),
+						Formatting::rgb([127, 127, 255]),
+					));
+					if ele.span.start == ele.span.end {
+						// FIXME: They shouldn't be inclusive by default
+						ann = ann.range(ele.span.start as usize..=ele.span.end as usize);
+					} else {
+						ann = ann.range(ele.span.start as usize..=ele.span.end as usize - 1);
+					}
+					ann.build();
+				}
+				out.push(builder.build())
+			}
 		}
 		out
 	}
@@ -154,7 +167,7 @@ fn diagnostics() {
 	.expect("parsed");
 
 	assert!(report.is_error());
-	let hidoc = report.to_hi_doc(src);
+	let hidoc = report.to_hi_doc();
 	for hidoc in hidoc {
 		let ansi = hi_doc::source_to_ansi(&hidoc);
 		println!("{ansi}")

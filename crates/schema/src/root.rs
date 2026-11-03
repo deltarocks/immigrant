@@ -14,15 +14,21 @@ use crate::{
 	composite::Composite,
 	diagnostics::Report,
 	extension::Extension,
-	ids::Ident,
+	ids::{Ident, ModuleId},
 	mixin::Mixin,
-	names::{DbNativeType, DbTable, DbType, RoleIdent, TableIdent, TypeIdent},
-	process::{NamingConvention, Pgnc, check_unique_identifiers, check_unique_mixin_identifiers},
+	names::{
+		DbNativeType, DbTable, DbType, MemberRename, QualifiedName, RoleIdent, TableIdent,
+		TypeIdent,
+	},
+	process::{
+		NamingConvention, Pgnc, check_unique_db_identifiers, check_unique_identifiers,
+		check_unique_mixin_identifiers,
+	},
 	role::{Permission, Role, RoleGrant},
 	scalar::PropagatedScalarData,
 	sql::Sql,
 	table::TableAttribute,
-	uid::{RenameExt, RenameMap},
+	uid::{HasUid, RenameExt, RenameMap, Uid},
 	util::UniqueMap as _,
 	view::{View, ViewAttribute},
 };
@@ -138,9 +144,40 @@ pub struct SchemaProcessOptions {
 	pub naming_convention: NamingConvention,
 }
 
+impl HasUid for Item {
+	fn uid(&self) -> Uid {
+		match self {
+			Item::Table(v) => v.uid(),
+			Item::Mixin(v) => v.uid(),
+			Item::Enum(v) => v.uid(),
+			Item::Scalar(v) => v.uid(),
+			Item::Composite(v) => v.uid(),
+			Item::View(v) => v.uid(),
+			Item::Role(v) => v.uid(),
+			Item::Extension(v) => v.uid(),
+		}
+	}
+}
+
 #[derive(Debug, Default)]
-pub struct Schema(pub Vec<Item>);
+pub struct SchemaMeta {
+	pub stubs: HashSet<Uid>,
+	pub external_modules: HashSet<ModuleId>,
+	pub renames: HashMap<QualifiedName, Vec<QualifiedName>>,
+}
+
+#[derive(Debug, Default)]
+pub struct Schema(pub Vec<Item>, pub SchemaMeta);
 impl Schema {
+	pub fn is_stub(&self, uid: Uid) -> bool {
+		self.1.stubs.contains(&uid)
+	}
+	pub fn is_external_module(&self, module: Option<ModuleId>) -> bool {
+		module.is_some_and(|m| self.1.external_modules.contains(&m))
+	}
+	pub fn previous_names(&self, name: &QualifiedName) -> Vec<QualifiedName> {
+		self.1.renames.get(name).cloned().unwrap_or_default()
+	}
 	pub fn process(
 		&mut self,
 		options: &SchemaProcessOptions,
@@ -199,6 +236,7 @@ impl Schema {
 		// Currently, no passes generate new items, nor
 		// alter identifiers, it should be moved to the end.
 		check_unique_identifiers(self, report);
+		self.check_member_renames(report);
 
 		let mut propagated_scalars = HashMap::new();
 		for s in self.0.iter_mut().filter_map(Item::as_scalar_mut) {
@@ -254,15 +292,50 @@ impl Schema {
 		self.fold_role_defaults(report);
 
 		match options.naming_convention {
-			NamingConvention::Postgres => (Pgnc(self)).process_naming(rn),
+			NamingConvention::Postgres => (Pgnc(&mut *self)).process_naming(rn),
 		};
+		check_unique_db_identifiers(self, rn, report);
+	}
+	fn check_member_renames(&self, report: &mut Report) {
+		fn check(renames: &[MemberRename], members: &[String], what: &str, report: &mut Report) {
+			for rename in renames {
+				if !members.contains(&rename.new.1) {
+					report
+						.error(format!("unknown {what} `{}`", rename.new.1))
+						.annotate("renamed here", rename.new.0);
+				}
+			}
+		}
+		for item in &self.0 {
+			match item {
+				Item::Table(t) => {
+					let names: Vec<_> = t.columns.iter().map(|c| c.id().name()).collect();
+					check(&t.renames, &names, "column", report);
+				}
+				Item::Enum(e) => {
+					let names: Vec<_> = e.items.iter().map(|i| i.id().name()).collect();
+					check(&e.renames, &names, "enum variant", report);
+				}
+				Item::Composite(c) => {
+					let names: Vec<_> = c.fields.iter().map(|f| f.id().name()).collect();
+					check(&c.renames, &names, "field", report);
+				}
+				_ => {}
+			}
+		}
 	}
 	fn fold_role_defaults(&mut self, report: &mut Report) {
 		let role_defaults: Vec<(RoleIdent, Vec<Permission>)> = self
 			.roles()
 			.map(|r| (r.id(), r.default_permissions()))
 			.collect();
-		for table in self.0.iter_mut().filter_map(Item::as_table_mut) {
+		let stubs = &self.1.stubs;
+		for table in self
+			.0
+			.iter_mut()
+			.filter_map(Item::as_table_mut)
+			.filter(|t| !stubs.contains(&t.uid()))
+		{
 			for attr in &table.attributes {
 				let role = match attr {
 					TableAttribute::RoleGrant(g) => g.role,
@@ -303,7 +376,12 @@ impl Schema {
 					.annotate("defined here", table.id().span());
 			}
 		}
-		for view in self.0.iter_mut().filter_map(Item::as_view_mut) {
+		for view in self
+			.0
+			.iter_mut()
+			.filter_map(Item::as_view_mut)
+			.filter(|v| !stubs.contains(&v.uid()))
+		{
 			for attr in &view.attributes {
 				let Some(grant) = attr.as_role_grant() else {
 					continue;

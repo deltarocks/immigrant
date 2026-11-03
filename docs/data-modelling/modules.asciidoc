@@ -1,0 +1,197 @@
+= Modules
+:order: 8
+
+A schema can be split into several files. The root file is `migrations/db.schema`, every other file is reached through `import` statements.
+
+[source,immigrant]
+----
+// migrations/db.schema
+import { User, user_id } from "./auth/users.schema";
+
+table Post {
+	author: user_id ~ User(id);
+};
+----
+
+[source,immigrant]
+----
+// migrations/auth/users.schema
+scalar user_id = sql"INTEGER";
+
+table User {
+	id: user_id @primary_key;
+};
+----
+
+== Imports
+
+Import paths are relative to the importing file and must start with `./` or `../`. Paths may point outside of the `migrations` directory, e.g. to a schema of another service.
+
+`import "./other.schema";` imports a file without binding any names. The file is still managed, which is useful to include a file that nothing references.
+
+=== Packages
+
+Paths starting with `@` point into a package: `@logseq/db.schema` is the file `db.schema` of the package `@logseq`. Relative imports inside of a package stay inside of it, a path climbing out of the package root is an error.
+
+Packages are virtual, they only exist in the files given to the parser (e.g. by `immigrant-web`), keyed by their full path:
+
+[source,jsonnet]
+----
+{
+	"@main/db.schema": "...",
+	"@logseq/db.schema": "import { User } from \"@main/db.schema\"; ...",
+}
+----
+
+The `immigrant` CLI reads schemas from disk and doesn't support packages.
+
+=== Multiple roots
+
+A project may have several root files, e.g. one per plugin. A file is managed if it is reachable from any root through normal imports, and all roots share a single migration history, so cross references between roots, including cycles, are handled in a single migration. Removing a root drops its items, unless they are still imported by another root.
+
+Every file has its own scope. A name is visible in a file only if the file declares it or imports it, including names used implicitly, like the column type of `user_id;`. Every declaration is importable, but imported names are not re-exported: import a name from the file that declares it.
+
+Two files may declare items with the same name, as long as their database names differ:
+
+[source,immigrant]
+----
+import { Audit as AuthAudit } from "./auth.schema";
+
+table Audit "post_audits" {
+	...
+};
+----
+
+Import cycles are allowed.
+
+=== Renaming on import
+
+`import { A as B }` makes `A` available under the local name `B`. The rename only affects the current file; generated SQL always uses the definition.
+
+=== Aliases
+
+`alias B = A;` gives a local name to anything visible in the file, including imported names. Aliases are file-local and can't be imported.
+
+[source,immigrant]
+----
+import { user_id } from "./auth.schema";
+alias uid = user_id;
+
+table Session {
+	uid;
+};
+----
+
+== External imports
+
+`import @external { ... }` makes names usable for references, but immigrant never creates, alters or drops the imported items. Use it for objects owned by another service or migration tool.
+
+[source,immigrant]
+----
+import @external { Invoice, invoice_id } from "../../billing/migrations/db.schema";
+
+table Payment {
+	invoice: invoice_id ~ Invoice(id);
+};
+----
+
+Which files are managed is decided from the root files: a file is managed if it is reachable from a root through normal imports. Everything that is only reachable through `@external` imports is external. If `a.schema` imports `b.schema`, and `b.schema` imports `a.schema` as `@external`, then with root `a.schema` both files are managed, and with root `b.schema` only `b.schema` is.
+
+External items are imported as stubs: only the imported names and what they need are kept.
+
+* Tables keep their name, database name, annotations, columns, primary key and unique constraints. Foreign keys, indexes, checks, policies, grants and defaults are ignored.
+* Scalars, enums and structs are kept whole. Attributes of an external scalar still propagate to columns that use it, e.g. an `@index` on an external scalar creates an index on your table.
+* Mixins are kept whole, applying an external mixin copies its contents into your table.
+* Roles keep their name; their `default` permissions are not applied to your tables.
+
+When an external item is renamed by its owner, references to it (e.g. foreign keys) generate no SQL, as PostgreSQL follows the rename.
+
+Switching a file between managed and external generates no SQL for its items: immigrant assumes the objects already exist as declared when adopting a file, and leaves them in place when releasing it. Items which were never referenced while the file was external are an exception: adopting them creates them.
+
+== Rename hints
+
+By default immigrant matches old and new items by code name, and then by database name. Changing both at once looks like a removed item and a new one. `@renamed` tells immigrant what an item was called before:
+
+[source,immigrant]
+----
+table Account {
+	email: sql"TEXT";
+	@renamed mail to email;
+};
+@renamed User to Account;
+
+enum Status {
+	active;
+	inactive;
+	@renamed disabled to inactive;
+};
+----
+
+[cols="1,2"]
+|===
+| Hint | SQL
+
+| table
+| `ALTER TABLE users RENAME TO accounts;`
+
+| column
+| `ALTER TABLE accounts RENAME COLUMN mail TO email;`
+
+| enum variant
+| `ALTER TYPE "Status" RENAME VALUE 'disabled' TO 'inactive';`
+
+| struct field
+| `ALTER TYPE "Point" RENAME ATTRIBUTE x TO lat;`
+|===
+
+The new name is resolved like any reference, the old name is taken from the current file. This allows moving an item to another file with a new name, by leaving the hint in the old file:
+
+[source,immigrant]
+----
+// migrations/db.schema, which used to declare Account
+import { Customer } from "./crm.schema";
+@renamed Account to Customer;
+----
+
+If the old file is deleted, put the hint in any managed file and point to the old file with `from`:
+
+[source,immigrant]
+----
+@renamed Customer from "./crm.schema" to Client;
+----
+
+A hint is only used if the old schema has the old name, and doesn't have the new one (unless the new name is itself renamed away, so swaps work). Hints which were already applied are ignored, so they can be removed after the migration is committed.
+
+== Migrations
+
+Every file reachable from the root is stored in migrations, keyed by its path relative to the `migrations` directory. External files are stored as slices: only the stub items and the imports they use are kept, so unrelated changes in external files don't produce migrations.
+
+[source,markdown]
+----
+## Schema diff (v2)
+
+### ../billing/db.schema (new)
+```immigrant
+scalar invoice_id = sql"INTEGER";
+...
+```
+
+### auth/users.schema
+@@ -2,4 +2,5 @@
+...
+
+### old.schema (removed)
+----
+
+When the list of roots differs from the previous migration, it is stored in a `## Roots` section, placed before the schema section:
+
+[source,markdown]
+----
+## Roots
+- @logseq/db.schema
+- @main/db.schema
+----
+
+Projects with a single `db.schema` root file keep the original migration format.
+
+Directories in `migrations` that don't start with a digit are not treated as migrations, so schema files can be organized into subdirectories.

@@ -1,7 +1,7 @@
 use std::{env::current_dir, fs, path::PathBuf, process};
 
 use clap::Parser;
-use cli::current_schema;
+use cli::{check_unique_code_names, current_schema};
 use file_diffs::find_root;
 use schema::annotation::Tracker;
 
@@ -69,13 +69,14 @@ fn generate(
 		schema: db_schema,
 	};
 
-	let (src, schema, mut report, rn) = current_schema(&root)?;
+	let (_, schema, mut report, rn) = current_schema(&root)?;
+	check_unique_code_names(&schema)?;
 	let mut tracker = Tracker::new(TRACKED_ANNOTATIONS);
 	let models = build(&schema, &rn, &mut report, &opts, &mut tracker);
 	tracker.report_unused(&mut report);
 	if report.is_error() {
 		eprintln!("schema parsing failed:");
-		for s in report.to_hi_doc(&src) {
+		for s in report.to_hi_doc() {
 			eprint!("{}", hi_doc::source_to_ansi(&s));
 		}
 		process::exit(1);
@@ -143,7 +144,7 @@ mod tests {
 		tracker.report_unused(&mut report);
 		if report.is_error() {
 			return Err(report
-				.to_hi_doc(src)
+				.to_hi_doc()
 				.iter()
 				.map(hi_doc::source_to_ansi)
 				.collect::<Vec<_>>()

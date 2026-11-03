@@ -2,7 +2,7 @@ use std::fmt::{self, Debug};
 
 use crate::{
 	HasDefaultDbName, HasIdent,
-	ids::{DbIdent, Ident, Kind},
+	ids::{DbIdent, Ident, Kind, ModuleId},
 	span::SimpleSpan,
 };
 
@@ -40,6 +40,22 @@ def_kind!(
 	UnknownKind(20),
 );
 
+pub type QualifiedName = (Option<String>, String);
+
+#[derive(Debug, Clone)]
+pub struct MemberRename {
+	pub old: (SimpleSpan, String),
+	pub new: (SimpleSpan, String),
+}
+
+pub fn member_hints(renames: &[MemberRename], member: &str) -> Vec<QualifiedName> {
+	renames
+		.iter()
+		.filter(|r| r.new.1 == member)
+		.map(|r| (None, r.old.1.clone()))
+		.collect()
+}
+
 pub struct DefName<K> {
 	pub code: Ident<K>,
 	pub db: Option<DbIdent<K>>,
@@ -48,9 +64,18 @@ impl<K: Kind> DefName<K> {
 	pub fn unchecked_new(code: Ident<K>, db: Option<DbIdent<K>>) -> Self {
 		Self { code, db }
 	}
-	pub fn alloc((span, code, db): (SimpleSpan, &str, Option<&str>)) -> Self {
+	pub fn definition(
+		(span, code, db): (SimpleSpan, &str, Option<&str>),
+		module: ModuleId,
+	) -> Self {
 		Self {
-			code: Ident::alloc((span, code)),
+			code: Ident::definition((span, code), module),
+			db: db.map(DbIdent::new),
+		}
+	}
+	pub fn member((span, code, db): (SimpleSpan, &str, Option<&str>)) -> Self {
+		Self {
+			code: Ident::member((span, code)),
 			db: db.map(DbIdent::new),
 		}
 	}

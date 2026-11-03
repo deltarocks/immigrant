@@ -1,0 +1,170 @@
+!!!TEST initial
+scalar id = sql"INTEGER";
+enum Status {
+	active;
+	disabled;
+};
+struct Point {
+	x: id;
+	y: id;
+};
+table User {
+	id @primary_key;
+	mail: sql"TEXT";
+	first: sql"TEXT";
+	second: sql"TEXT";
+	status: Status;
+	pos: Point;
+};
+!!!UPDATE rename table, column, variant and field, code and db names at once
+scalar id = sql"INTEGER";
+enum Status {
+	active;
+	inactive;
+	@renamed disabled to inactive;
+};
+struct Point {
+	lat: id;
+	y: id;
+	@renamed x to lat;
+};
+table Account {
+	id @primary_key;
+	email: sql"TEXT";
+	first: sql"TEXT";
+	second: sql"TEXT";
+	status: Status;
+	pos: Point;
+	@renamed mail to email;
+};
+@renamed User to Account;
+!!!UPDATE stale hints are ignored
+scalar id = sql"INTEGER";
+enum Status {
+	active;
+	inactive;
+	@renamed disabled to inactive;
+};
+struct Point {
+	lat: id;
+	y: id;
+	@renamed x to lat;
+};
+table Account {
+	id @primary_key;
+	email: sql"TEXT";
+	first: sql"TEXT";
+	second: sql"TEXT";
+	status: Status;
+	pos: Point;
+	@renamed mail to email;
+};
+@renamed User to Account;
+!!!UPDATE swap columns
+scalar id = sql"INTEGER";
+enum Status {
+	active;
+	inactive;
+};
+struct Point {
+	lat: id;
+	y: id;
+};
+table Account {
+	id @primary_key;
+	email: sql"TEXT";
+	second: sql"TEXT";
+	first: sql"TEXT";
+	status: Status;
+	pos: Point;
+	@renamed first to second;
+	@renamed second to first;
+};
+!!!UPDATE move to another file with rename
+import { Customer } from "./crm.schema";
+scalar id = sql"INTEGER";
+enum Status {
+	active;
+	inactive;
+};
+struct Point {
+	lat: id;
+	y: id;
+};
+@renamed Account to Customer;
+!!!FILE crm.schema
+import { id, Status, Point } from "./db.schema";
+table Customer {
+	id @primary_key;
+	email: sql"TEXT";
+	second: sql"TEXT";
+	first: sql"TEXT";
+	status: Status;
+	pos: Point;
+};
+!!!UPDATE old file is deleted, hint uses from
+scalar id = sql"INTEGER";
+enum Status {
+	active;
+	inactive;
+};
+struct Point {
+	lat: id;
+	y: id;
+};
+table Client {
+	id @primary_key;
+	email: sql"TEXT";
+	second: sql"TEXT";
+	first: sql"TEXT";
+	status: Status;
+	pos: Point;
+};
+@renamed Customer from "./crm.schema" to Client;
+!!!RESULT
+-- updated: initial --
+CREATE TYPE "Status" AS ENUM (
+	'active'
+,	'disabled'
+);
+
+CREATE DOMAIN id AS INTEGER;
+CREATE TYPE "Point" AS (
+	x id
+,	y id
+);
+CREATE TABLE users (
+	id id NOT NULL
+,	mail TEXT NOT NULL
+,	first TEXT NOT NULL
+,	"second" TEXT NOT NULL
+,	status Status NOT NULL
+,	pos Point NOT NULL
+,	CONSTRAINT users_id_pkey PRIMARY KEY(id)
+,	CONSTRAINT composite_nullability_check CHECK (pos IS NULL OR pos.x IS NOT NULL AND pos.y IS NOT NULL)
+);
+-- updated: rename table, column, variant and field, code and db names at once --
+ALTER TABLE users RENAME TO accounts;
+ALTER TYPE "Status" RENAME VALUE 'disabled' TO 'inactive';
+ALTER TYPE "Point"
+	RENAME ATTRIBUTE x TO lat
+;
+ALTER TABLE accounts RENAME COLUMN mail TO email;
+ALTER TABLE accounts RENAME CONSTRAINT users_id_pkey TO accounts_id_pkey;
+-- updated: stale hints are ignored --
+
+-- updated: swap columns --
+ALTER TABLE accounts RENAME COLUMN first TO tmp_1;
+ALTER TABLE accounts RENAME COLUMN "second" TO first;
+ALTER TABLE accounts RENAME COLUMN tmp_1 TO "second";
+-- updated: move to another file with rename --
+ALTER TABLE accounts RENAME TO customers;
+ALTER TABLE customers RENAME CONSTRAINT accounts_id_pkey TO customers_id_pkey;
+-- updated: old file is deleted, hint uses from --
+ALTER TABLE customers RENAME TO clients;
+ALTER TABLE clients RENAME CONSTRAINT customers_id_pkey TO clients_id_pkey;
+-- updated: cleanup schema changes --
+DROP TABLE clients;
+DROP TYPE "Point";
+DROP TYPE "Status";
+DROP DOMAIN id;

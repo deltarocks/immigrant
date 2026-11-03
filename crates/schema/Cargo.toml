@@ -30,4 +30,4 @@ default = ["hi-doc"]
 hi-doc = ["dep:hi-doc"]
 # TODO: Use debug-assertions instead
 strict = []
-tree-sitter-highlight = ["hi-doc", "dep:tree-sitter-highlight", "dep:tree-sitter-immigrant"]
+tree-sitter-highlight = ["hi-doc", "hi-doc/tree-sitter", "dep:tree-sitter-highlight", "dep:tree-sitter-immigrant"]

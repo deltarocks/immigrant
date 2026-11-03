@@ -136,7 +136,7 @@ CHECK constraint using the link:expressions.asciidoc[expression language]. `_` i
 table Example {
     age: sql"INTEGER" @check(_ >= 0);
     name: sql"TEXT" @check(char_length(_) > 0);
-    code: sql"TEXT" @check "valid_code" (LEFT(_, 1) == 'U' && char_length(_) == 33);
+    code: sql"TEXT" @check "valid_code" (LEFT(_, 1) == "U" && char_length(_) == 33);
 };
 ----
 
@@ -260,10 +260,10 @@ All primary keys merge into one. Checks with the same name merge with AND:
 
 [source,immigrant]
 ----
-scalar test = sql"TEXT" @inline @check "testcheck" (_ != '1');
+scalar test = sql"TEXT" @inline @check "testcheck" (_ != "1");
 
 table Foo {
-    test @check "testcheck" (_ != '2');
+    test @check "testcheck" (_ != "2");
     /// produces CHECK (test <> '1' AND test <> '2')
 };
 ----

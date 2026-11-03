@@ -1,6 +1,7 @@
 use std::{
 	collections::{BTreeMap, BTreeSet, HashMap, HashSet},
 	fmt::{self, Display},
+	mem,
 	ops::{Deref, DerefMut},
 };
 
@@ -11,13 +12,14 @@ use schema::{
 	SchemaScalar, SchemaSql, SchemaTable, SchemaTableOrView, SchemaType, SchemaView, TableCheck,
 	TableColumn, TableDiff, TableForeignKey, TableIndex, TablePolicy, TablePrimaryKey, TableSql,
 	TableUniqueConstraint,
+	composite::CompositeField,
 	diagnostics::Report,
 	ids::{DbIdent, Ident},
 	index::Check,
-	mk_change_list,
+	mk_change_list, mk_change_list_with_hints,
 	names::{
 		ConstraintKind, DbColumn, DbConstraint, DbEnumItem, DbIndex, DbItem, DbPolicy, DbRole,
-		DbTable, DbType, DbView,
+		DbTable, DbType, DbView, FieldKind, member_hints,
 	},
 	renamelist::RenameOp,
 	role::{Permission, RoleGrant},
@@ -31,8 +33,18 @@ use schema::{
 };
 
 use crate::escape::escape_identifier;
+use crate::migration::NonDestructive;
+
+fn obsolete_name(keep: &str, name: &str) -> String {
+	let mut out = format!("obsolete_{keep}_{name}");
+	while out.len() > validate::MAX_IDENTIFIER_LEN {
+		out.pop();
+	}
+	out
+}
 
 mod escape;
+pub mod migration;
 pub mod validate;
 
 #[derive(Clone, Copy, Debug)]
@@ -129,6 +141,51 @@ impl Pg<TableColumn<'_>> {
 	pub fn drop_alter(&self, out: &mut Vec<Alternation>, rn: &RenameMap) {
 		let name = Id(self.db(rn));
 		out.push(alt_group!("DROP COLUMN {name}"));
+	}
+	fn keep_type(&self, rn: &RenameMap, report: &mut Report) -> Option<String> {
+		match self.ty() {
+			SchemaType::Scalar(s) if !s.inlined() => {
+				Some(s.inner_type(rn, report).raw().to_owned())
+			}
+			SchemaType::Enum(_) | SchemaType::Composite(_) => Some("TEXT".to_owned()),
+			SchemaType::Scalar(_) => None,
+		}
+	}
+	fn unlink_alter(
+		&self,
+		name: &str,
+		drop_not_null: bool,
+		out: &mut Vec<Alternation>,
+		rn: &RenameMap,
+		report: &mut Report,
+	) {
+		let name = Id(name);
+		if drop_not_null && !self.nullable {
+			out.push(alt_group!("ALTER COLUMN {name} DROP NOT NULL"));
+		}
+		if self.default().is_some() {
+			out.push(alt_group!("ALTER COLUMN {name} DROP DEFAULT"));
+		}
+		if let Some(ty) = self.keep_type(rn, report) {
+			out.push(alt_group!(
+				"ALTER COLUMN {name} SET DATA TYPE {ty} USING {name}::{ty}"
+			));
+		}
+	}
+	pub fn keep_alter(
+		&self,
+		keep: &str,
+		out: &mut Vec<Alternation>,
+		rn: &RenameMap,
+		report: &mut Report,
+	) {
+		let name = Id(self.db(rn));
+		let kept = obsolete_name(keep, self.db(rn).raw());
+		out.push(alt_ungroup!(
+			"RENAME COLUMN {name} TO {}",
+			Id(kept.as_str())
+		));
+		self.unlink_alter(&kept, true, out, rn, report);
 	}
 	pub fn create_alter(&self, out: &mut Vec<Alternation>, rn: &RenameMap, report: &mut Report) {
 		let mut inl = String::new();
@@ -354,6 +411,40 @@ impl Pg<SchemaTable<'_>> {
 		let table_name = Id(self.db(rn));
 		wl!(sql, "DROP TABLE {table_name};");
 	}
+	fn keep_drop_foreign_keys(&self, sql: &mut String, rn: &RenameMap) {
+		let mut out = Vec::new();
+		for constraint in pg_constraints(self) {
+			Pg(constraint).drop_alter_fk(&mut out, rn);
+		}
+		self.print_alternations(&out, sql, rn);
+	}
+	fn keep(&self, keep: &str, sql: &mut String, rn: &RenameMap, report: &mut Report) {
+		let table_name = Id(self.db(rn));
+		for policy in self.policies() {
+			Pg(policy).drop(sql, rn);
+		}
+		for (role, perms) in table_grants(self, rn) {
+			wl!(
+				sql,
+				"REVOKE {} ON {table_name} FROM {};",
+				format_permissions(&perms),
+				Id(role)
+			);
+		}
+		for index in self.indexes() {
+			Pg(index).drop(sql, rn);
+		}
+		let mut out = Vec::new();
+		for constraint in pg_constraints(self) {
+			Pg(constraint).drop_alter_non_fk(&mut out, rn);
+		}
+		for column in self.columns() {
+			Pg(column).unlink_alter(column.db(rn).raw(), false, &mut out, rn, report);
+		}
+		let kept = obsolete_name(keep, self.db(rn).raw());
+		out.push(alt_ungroup!("RENAME TO {}", Id(kept.as_str())));
+		self.print_alternations(&out, sql, rn);
+	}
 	pub fn rename(&self, to: DbTable, sql: &mut String, rn: &mut RenameMap, external: bool) {
 		if !external {
 			self.print_alternations(&[alt_ungroup!("RENAME TO {}", Id(&to))], sql, rn);
@@ -490,11 +581,12 @@ impl Pg<TableDiff<'_>> {
 
 		let old_columns = self.old.columns().collect::<Vec<_>>();
 		let new_columns = self.new.columns().collect::<Vec<_>>();
-		let column_changes = mk_change_list(
+		let column_changes = mk_change_list_with_hints(
 			rn,
 			&old_columns,
 			&new_columns,
 			|v| v,
+			|c| member_hints(&self.new.renames, &c.id().name()),
 			report_old,
 			report_new,
 		);
@@ -756,12 +848,25 @@ impl Pg<TableDiff<'_>> {
 		rn: &RenameMap,
 		column_changes: ChangeList<TableColumn<'_>>,
 		external: bool,
+		non_destructive: &NonDestructive,
+		report_old: &mut Report,
 	) {
 		let mut out = Vec::new();
 
 		// Drop old columns
 		for column in column_changes.dropped {
-			Pg(column).drop_alter(&mut out, rn);
+			match non_destructive {
+				NonDestructive::Off => Pg(column).drop_alter(&mut out, rn),
+				NonDestructive::Keep(keep) => Pg(column).keep_alter(keep, &mut out, rn, report_old),
+				NonDestructive::Fail => {
+					report_old
+						.error(format!(
+							"column `{}` would be dropped, but data destruction is not allowed",
+							column.db(rn).raw()
+						))
+						.annotate("defined here", column.id().span());
+				}
+			}
 		}
 
 		if !external {
@@ -890,7 +995,7 @@ impl IsIsomorph for Pg<TablePolicy<'_>> {
 		Pg(self.table.sql(&self.check)).print(&mut sql_a, rn, report_self);
 		let mut sql_b = String::new();
 		Pg(other.table.sql(&other.check)).print(&mut sql_b, rn, report_other);
-		self.role.name() == other.role.name() && sql_a == sql_b
+		self.role.qualified_name() == other.role.qualified_name() && sql_a == sql_b
 	}
 }
 impl IsCompatible for Pg<TablePolicy<'_>> {
@@ -905,7 +1010,7 @@ impl IsCompatible for Pg<TablePolicy<'_>> {
 		Pg(self.table.sql(&self.check)).print(&mut sql_a, rn, report_self);
 		let mut sql_b = String::new();
 		Pg(new.table.sql(&new.check)).print(&mut sql_b, rn, report_new);
-		self.role.name() == new.role.name() && sql_a == sql_b
+		self.role.qualified_name() == new.role.qualified_name() && sql_a == sql_b
 	}
 }
 impl Pg<TablePolicy<'_>> {
@@ -1021,7 +1126,6 @@ impl Pg<TableIndex<'_>> {
 	}
 }
 impl Pg<SchemaDiff<'_>> {
-	#[allow(clippy::too_many_lines)]
 	pub(crate) fn print(
 		&self,
 		sql: &mut String,
@@ -1029,12 +1133,37 @@ impl Pg<SchemaDiff<'_>> {
 		report_old: &mut Report,
 		report_new: &mut Report,
 	) {
+		self.print_with(sql, rn, report_old, report_new, &NonDestructive::Off);
+	}
+	#[allow(clippy::too_many_lines)]
+	pub(crate) fn print_with(
+		&self,
+		sql: &mut String,
+		rn: &mut RenameMap,
+		report_old: &mut Report,
+		report_new: &mut Report,
+		non_destructive: &NonDestructive,
+	) {
+		self.sync_stub_names(rn);
 		let changelist = self.changelist(rn, report_old, report_new);
 
-		let old_roles = self.old.schema_roles();
-		let new_roles = self.new.schema_roles();
-		let role_changes =
-			mk_change_list(rn, &old_roles, &new_roles, |v| v, report_old, report_new);
+		let (old_roles, new_roles) = without_stubs(
+			self.old,
+			self.old.schema_roles(),
+			self.new,
+			self.new.schema_roles(),
+			SchemaRole::is_stub,
+			rn,
+		);
+		let role_changes = mk_change_list_with_hints(
+			rn,
+			&old_roles,
+			&new_roles,
+			|v| v,
+			|r| self.new.previous_names(&r.id().qualified_name()),
+			report_old,
+			report_new,
+		);
 		{
 			let mut stored = HashMap::new();
 			for ele in role_changes.renamed {
@@ -1061,8 +1190,14 @@ impl Pg<SchemaDiff<'_>> {
 			Pg(*role).create(sql, rn);
 		}
 
-		let old_extensions = self.old.schema_extensions();
-		let new_extensions = self.new.schema_extensions();
+		let (old_extensions, new_extensions) = without_stubs(
+			self.old,
+			self.old.schema_extensions(),
+			self.new,
+			self.new.schema_extensions(),
+			SchemaExtension::is_stub,
+			rn,
+		);
 		let extension_changes = mk_change_list(
 			rn,
 			&old_extensions,
@@ -1104,8 +1239,8 @@ impl Pg<SchemaDiff<'_>> {
 		}
 
 		// Rename/moveaway everything
+		let mut stored = HashMap::new();
 		for ele in changelist.renamed {
-			let mut stored = HashMap::new();
 			match ele {
 				RenameOp::Store(i, t) => {
 					stored.insert(t, i);
@@ -1135,6 +1270,18 @@ impl Pg<SchemaDiff<'_>> {
 			Pg(ele).print_renamed_added(sql, rn, report_old, report_new);
 		}
 
+		for ele in changelist
+			.updated
+			.iter()
+			.filter(|d| matches!(d.old, SchemaItem::Composite(_)))
+			.map(|ele| {
+				let old = ele.old.as_composite().expect("composite");
+				let new = ele.new.as_composite().expect("composite");
+				Diff { old, new }
+			}) {
+			Pg(ele).print_renamed(sql, rn, report_old, report_new);
+		}
+
 		let mut initialized_tys = HashSet::new();
 		for ele in &changelist.updated {
 			// If item is updated - it must be already initialized
@@ -1150,6 +1297,15 @@ impl Pg<SchemaDiff<'_>> {
 			.filter(|s| s.inlined() || s.is_external())
 		{
 			initialized_tys.insert(ele.id());
+		}
+		for ele in self
+			.new
+			.items()
+			.iter()
+			.filter(|i| i.is_stub())
+			.filter_map(SchemaItem::as_type)
+		{
+			initialized_tys.insert(ele.ident());
 		}
 
 		// Create new types, in toposorted order
@@ -1315,7 +1471,14 @@ impl Pg<SchemaDiff<'_>> {
 		}
 
 		for (diff, column_changes) in diffs.iter().zip(changes) {
-			Pg(diff).print_stage3(sql, rn, column_changes, diff.new.is_external());
+			Pg(diff).print_stage3(
+				sql,
+				rn,
+				column_changes,
+				diff.new.is_external(),
+				non_destructive,
+				report_old,
+			);
 		}
 
 		for (diff, created) in diffs.iter().zip(created_policies) {
@@ -1414,26 +1577,51 @@ impl Pg<SchemaDiff<'_>> {
 			ele.print_alternations(&out, sql, rn);
 		}
 
-		// Drop foreign keys, both ends of which reference dropped tables
-		for a in changelist.dropped.iter().filter_map(SchemaItem::as_table) {
-			let mut out = Vec::new();
-			'fk: for fk in a.foreign_keys() {
-				for b in changelist.dropped.iter().filter_map(SchemaItem::as_table) {
-					if fk.target == b.id() {
-						Pg(PgTableConstraint::ForeignKey(fk)).drop_alter_fk(&mut out, rn);
-						continue 'fk;
+		let dropped_tables = changelist
+			.dropped
+			.iter()
+			.filter_map(SchemaItem::as_table)
+			.filter(|t| !t.is_external())
+			.collect_vec();
+		match non_destructive {
+			NonDestructive::Off => {
+				// Drop foreign keys, both ends of which reference dropped tables
+				for a in changelist.dropped.iter().filter_map(SchemaItem::as_table) {
+					let mut out = Vec::new();
+					'fk: for fk in a.foreign_keys() {
+						for b in changelist.dropped.iter().filter_map(SchemaItem::as_table) {
+							if fk.target == b.id() {
+								Pg(PgTableConstraint::ForeignKey(fk)).drop_alter_fk(&mut out, rn);
+								continue 'fk;
+							}
+						}
 					}
+					Pg(a).print_alternations(&out, sql, rn);
+				}
+
+				// Drop old tables
+				for ele in &dropped_tables {
+					Pg(*ele).drop(sql, rn);
 				}
 			}
-			Pg(a).print_alternations(&out, sql, rn);
-		}
-
-		// Drop old tables
-		for ele in changelist.dropped.iter().filter_map(SchemaItem::as_table) {
-			if ele.is_external() {
-				continue;
+			NonDestructive::Keep(keep) => {
+				for ele in &dropped_tables {
+					Pg(*ele).keep_drop_foreign_keys(sql, rn);
+				}
+				for ele in &dropped_tables {
+					Pg(*ele).keep(keep, sql, rn, report_old);
+				}
 			}
-			Pg(ele).drop(sql, rn);
+			NonDestructive::Fail => {
+				for ele in &dropped_tables {
+					report_old
+						.error(format!(
+							"table `{}` would be dropped, but data destruction is not allowed",
+							ele.db(rn).raw()
+						))
+						.annotate("defined here", ele.id().span());
+				}
+			}
 		}
 
 		// Drop old types, in toposorted order
@@ -1537,6 +1725,23 @@ impl Pg<&Schema> {
 	) {
 		Pg(SchemaDiff { old, new: self }).print(sql, rn, report_old, report_new);
 	}
+	pub fn diff_with(
+		&self,
+		old: &Self,
+		sql: &mut String,
+		rn: &mut RenameMap,
+		report_old: &mut Report,
+		report_new: &mut Report,
+		non_destructive: &NonDestructive,
+	) {
+		Pg(SchemaDiff { old, new: self }).print_with(
+			sql,
+			rn,
+			report_old,
+			report_new,
+			non_destructive,
+		);
+	}
 	pub fn create(&self, sql: &mut String, rn: &mut RenameMap, report: &mut Report) {
 		self.diff(&Pg(&Schema::default()), sql, rn, &mut Report::new(), report);
 	}
@@ -1606,17 +1811,18 @@ impl Pg<EnumDiff<'_>> {
 		report_old: &mut Report,
 		report_new: &mut Report,
 	) {
-		let changelist = schema::mk_change_list(
+		let changelist = mk_change_list_with_hints(
 			rn,
 			&self.0.old.items().collect_vec(),
 			&self.0.new.items().collect_vec(),
 			|v| v,
+			|i| member_hints(&self.0.new.renames, &i.id().name()),
 			report_old,
 			report_new,
 		);
 		let mut changes = vec![];
+		let mut stored = HashMap::new();
 		for el in changelist.renamed.iter().cloned() {
-			let mut stored = HashMap::new();
 			match el {
 				RenameOp::Store(i, t) => {
 					stored.insert(t, i);
@@ -1630,7 +1836,7 @@ impl Pg<EnumDiff<'_>> {
 				}
 				RenameOp::Restore(r, n, _) => {
 					let stored = stored.remove(&r).expect("was not stored");
-					Pg(stored).rename_alter(n, rn);
+					changes.push(Pg(stored).rename_alter(n, rn));
 				}
 			}
 		}
@@ -1645,6 +1851,47 @@ impl Pg<EnumDiff<'_>> {
 			changelist.dropped.is_empty(),
 			"enums with dropped elements are not compatible"
 		);
+	}
+}
+impl Pg<Diff<SchemaComposite<'_>>> {
+	pub fn print_renamed(
+		&self,
+		sql: &mut String,
+		rn: &mut RenameMap,
+		report_old: &mut Report,
+		report_new: &mut Report,
+	) {
+		let changelist = mk_change_list_with_hints(
+			rn,
+			&self.old.fields().collect_vec(),
+			&self.new.fields().collect_vec(),
+			|v| v,
+			|f| member_hints(&self.new.renames, &f.id().name()),
+			report_old,
+			report_new,
+		);
+		let mut changes = vec![];
+		let mut stored = HashMap::new();
+		let rename = |field: CompositeField<'_>, to: DbIdent<FieldKind>, rn: &mut RenameMap| {
+			let out = format!("RENAME ATTRIBUTE {} TO {}", Id(field.db(rn)), Id(&to));
+			field.set_db(rn, to);
+			out
+		};
+		for el in changelist.renamed {
+			match el {
+				RenameOp::Store(f, t) => {
+					stored.insert(t, f);
+					changes.push(rename(f, t.db(), rn));
+				}
+				RenameOp::Moveaway(f, t) => changes.push(rename(f, t.db(), rn)),
+				RenameOp::Rename(f, n, _) => changes.push(rename(f, n, rn)),
+				RenameOp::Restore(t, n, _) => {
+					let f = stored.remove(&t).expect("was not stored");
+					changes.push(rename(f, n, rn));
+				}
+			}
+		}
+		Pg(self.old).print_alternations(&changes, sql, rn);
 	}
 }
 impl Pg<SchemaComposite<'_>> {
@@ -2567,11 +2814,12 @@ impl IsCompatible for Pg<SchemaItem<'_>> {
 			(SchemaItem::Enum(a), SchemaItem::Enum(b)) => {
 				// There is no DB engine, which supports removing enum variants, so removals are incompatible, and the
 				// enum should be recreated.
-				mk_change_list(
+				mk_change_list_with_hints(
 					rn,
 					&a.items().collect_vec(),
 					&b.items().collect_vec(),
 					|v| v,
+					|i| member_hints(&b.renames, &i.id().name()),
 					report_self,
 					report_new,
 				)
@@ -2580,11 +2828,12 @@ impl IsCompatible for Pg<SchemaItem<'_>> {
 			}
 			(SchemaItem::Composite(a), SchemaItem::Composite(b)) => {
 				// There is no DB engine, which supports updating structs
-				let changes = mk_change_list(
+				let changes = mk_change_list_with_hints(
 					rn,
 					&a.fields().collect_vec(),
 					&b.fields().collect_vec(),
 					|v| v,
+					|f| member_hints(&b.renames, &f.id().name()),
 					report_self,
 					report_new,
 				);
@@ -2682,29 +2931,111 @@ impl Pg<SchemaDiff<'_>> {
 		report_old: &mut Report,
 		report_new: &mut Report,
 	) -> ChangeList<SchemaItem<'_>> {
-		let old = self.old.material_items();
-		let new = self.new.material_items();
-		mk_change_list(
+		let (old, new) = without_stubs(
+			self.old,
+			self.old.material_items(),
+			self.new,
+			self.new.material_items(),
+			SchemaItem::is_stub,
+			rn,
+		);
+		mk_change_list_with_hints(
 			rn,
 			old.as_slice(),
 			new.as_slice(),
 			Pg,
+			|i| self.new.previous_names(&i.id().qualified_name()),
 			report_old,
 			report_new,
 		)
 	}
+	fn sync_stub_names(&self, rn: &mut RenameMap) {
+		fn sync<T: HasIdent + RenameExt>(old: &[T], new: &[T], rn: &mut RenameMap) {
+			for old in old {
+				let name = old.id().qualified_name();
+				if let Some(new) = new.iter().find(|n| n.id().qualified_name() == name) {
+					old.set_db(rn, new.db(rn));
+				}
+			}
+		}
+		let new_items = self.new.items();
+		for old in self.old.items().into_iter().filter(SchemaItem::is_stub) {
+			let name = old.id().qualified_name();
+			let Some(new) = new_items.iter().find(|n| {
+				n.is_stub()
+					&& mem::discriminant(*n) == mem::discriminant(&old)
+					&& n.id().qualified_name() == name
+			}) else {
+				continue;
+			};
+			old.set_db(rn, new.db(rn));
+			match (old, new) {
+				(SchemaItem::Table(o), SchemaItem::Table(n)) => sync(&o.columns, &n.columns, rn),
+				(SchemaItem::Enum(o), SchemaItem::Enum(n)) => sync(&o.items, &n.items, rn),
+				(SchemaItem::Composite(o), SchemaItem::Composite(n)) => {
+					sync(&o.fields, &n.fields, rn)
+				}
+				_ => {}
+			}
+		}
+		let old_roles: Vec<_> = self
+			.old
+			.schema_roles()
+			.into_iter()
+			.filter(SchemaRole::is_stub)
+			.collect();
+		let new_roles: Vec<_> = self
+			.new
+			.schema_roles()
+			.into_iter()
+			.filter(SchemaRole::is_stub)
+			.collect();
+		sync(&old_roles, &new_roles, rn);
+	}
+}
+
+fn without_stubs<T: RenameExt + HasIdent>(
+	old_schema: &Schema,
+	old: Vec<T>,
+	new_schema: &Schema,
+	new: Vec<T>,
+	is_stub: impl Fn(&T) -> bool,
+	rn: &RenameMap,
+) -> (Vec<T>, Vec<T>) {
+	let db = |v: &T| v.db(rn).raw().to_owned();
+	let old_stubs: HashSet<String> = old.iter().filter(|v| is_stub(v)).map(db).collect();
+	let new_stubs: HashSet<String> = new.iter().filter(|v| is_stub(v)).map(db).collect();
+	let old = old
+		.into_iter()
+		.filter(|v| {
+			!is_stub(v)
+				&& !new_schema.is_external_module(v.id().module())
+				&& !new_stubs.contains(&db(v))
+		})
+		.collect();
+	let new = new
+		.into_iter()
+		.filter(|v| {
+			!is_stub(v)
+				&& !old_schema.is_external_module(v.id().module())
+				&& !old_stubs.contains(&db(v))
+		})
+		.collect();
+	(old, new)
 }
 
 #[cfg(test)]
 mod tests {
-	use std::{fs, io::Write, path::PathBuf};
+	use std::{collections::BTreeMap, fs, io::Write, mem, path::PathBuf};
 
 	use schema::diagnostics::Report;
 	use schema::{
 		Diff,
-		parser::{SchemaVersion, parse},
+		parser::{ROOT_MODULE, SchemaVersion},
 		process::NamingConvention,
+		project::parse_project,
 		root::SchemaProcessOptions,
+		source::ResolvedSpec,
 		uid::RenameMap,
 		wl,
 	};
@@ -2718,6 +3049,29 @@ mod tests {
 			generator_supports_domain: true,
 			naming_convention: NamingConvention::Postgres,
 		}
+	}
+
+	fn split_files(text: &str) -> (Vec<ResolvedSpec>, BTreeMap<String, String>) {
+		let mut roots = vec![ROOT_MODULE.to_owned()];
+		let mut files = BTreeMap::new();
+		let mut current = ROOT_MODULE.to_owned();
+		let mut buf = String::new();
+		for line in text.split_inclusive('\n') {
+			if let Some(path) = line.strip_prefix("!!!FILE ") {
+				let path = path.trim().to_owned();
+				files.insert(mem::replace(&mut current, path), mem::take(&mut buf));
+			} else if let Some(list) = line.strip_prefix("!!!ROOTS") {
+				roots = list.split_whitespace().map(str::to_owned).collect();
+			} else {
+				buf.push_str(line);
+			}
+		}
+		files.insert(current, buf);
+		let roots = roots
+			.iter()
+			.map(|r| ResolvedSpec::root(r).expect("valid root"))
+			.collect();
+		(roots, files)
 	}
 
 	fn test_example(name: &str) {
@@ -2801,16 +3155,18 @@ mod tests {
 			.iter()
 			.map(|example| {
 				let mut report = Report::new();
-				let schema = match parse(
-					example.schema.as_str(),
+				let (roots, files) = split_files(&example.schema);
+				let schema = match parse_project(
+					&roots,
+					&files,
 					example.version,
 					&default_options(),
 					&mut rn,
 					&mut report,
 				) {
-					Ok(s) => s,
+					Ok(p) => p.schema,
 					Err(e) => {
-						let e = report.to_hi_doc(&example.schema);
+						let e = report.to_hi_doc();
 
 						for e in &e {
 							eprintln!("{}", hi_doc::source_to_ansi(e));

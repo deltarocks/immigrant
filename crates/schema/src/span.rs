@@ -1,10 +1,9 @@
 use std::cell::RefCell;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub(crate) struct SourceId(u32);
+pub struct SourceId(u32);
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-#[allow(dead_code)]
 pub struct SimpleSpan {
 	source_id: SourceId,
 	pub start: u32,
@@ -18,27 +17,46 @@ impl SimpleSpan {
 			end,
 		}
 	}
+	pub fn source(&self) -> SourceId {
+		self.source_id
+	}
+}
+
+struct Source {
+	path: String,
+	text: String,
 }
 
 thread_local! {
-	static SPANS: RefCell<Vec<String>> = Default::default();
+	static SPANS: RefCell<Vec<Source>> = Default::default();
 }
 
-pub(crate) fn register_source(text: String) -> SourceId {
+pub(crate) fn register_source(path: String, text: String) -> SourceId {
 	SPANS.with(|src| {
 		let mut src = src.borrow_mut();
 		// As sources can't be removed - there is no holes
 		let id = SourceId(src.len() as u32);
-		src.push(text);
+		src.push(Source { path, text });
 		id
 	})
 }
-#[allow(dead_code)]
-pub(crate) fn get_source(src: SourceId) -> String {
-	SPANS.with(|srcs| {
-		let srcs = srcs.borrow();
-		srcs.get(src.0 as usize)
-			.expect("source is not registered?")
-			.clone()
-	})
+impl SourceId {
+	pub fn path(&self) -> String {
+		SPANS.with(|srcs| {
+			srcs.borrow()
+				.get(self.0 as usize)
+				.expect("source is not registered?")
+				.path
+				.clone()
+		})
+	}
+	pub fn text(&self) -> String {
+		SPANS.with(|srcs| {
+			srcs.borrow()
+				.get(self.0 as usize)
+				.expect("source is not registered?")
+				.text
+				.clone()
+		})
+	}
 }

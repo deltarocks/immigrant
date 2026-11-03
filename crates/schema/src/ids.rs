@@ -1,7 +1,7 @@
 use std::{
 	cell::{Cell, RefCell},
 	cmp::Ordering,
-	collections::{HashMap, hash_map::Entry},
+	collections::HashMap,
 	fmt::{self, Debug},
 	hash::{Hash, Hasher},
 	marker::PhantomData,
@@ -12,9 +12,48 @@ use derivative::Derivative;
 use crate::{names::UnknownKind, span::SimpleSpan};
 
 #[derive(Default)]
+struct Interner {
+	ids: HashMap<String, u32>,
+	values: Vec<String>,
+}
+impl Interner {
+	fn intern(&mut self, value: &str) -> u32 {
+		if let Some(id) = self.ids.get(value) {
+			return *id;
+		}
+		let id = u32::try_from(self.values.len()).expect("out of ids");
+		self.values.push(value.to_owned());
+		self.ids.insert(value.to_owned(), id);
+		id
+	}
+	fn get(&self, id: u32) -> &str {
+		&self.values[id as usize]
+	}
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+pub(crate) struct NameId(u32);
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ModuleId(u32);
+impl ModuleId {
+	pub fn new(path: &str) -> Self {
+		ALLOCATOR.with(|a| ModuleId(a.1.modules.borrow_mut().intern(path)))
+	}
+	pub fn path(&self) -> String {
+		ALLOCATOR.with(|a| a.1.modules.borrow().get(self.0).to_owned())
+	}
+}
+impl Debug for ModuleId {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "{:?}", self.path())
+	}
+}
+
+#[derive(Default)]
 pub struct CodeIdentAllocator {
-	ids: RefCell<HashMap<String, u16>>,
-	max_id: Cell<u16>,
+	names: RefCell<Interner>,
+	modules: RefCell<Interner>,
 
 	#[cfg(feature = "strict")]
 	generation: Cell<u32>,
@@ -24,47 +63,36 @@ impl CodeIdentAllocator {
 	pub fn next_generation(&self) {
 		self.generation.set(self.generation.get() + 1);
 	}
-	fn name(&self, id: u16) -> String {
-		let ids = self.ids.borrow();
-		for (k, v) in ids.iter() {
-			if *v == id {
-				return k.to_owned();
-			}
-		}
-		unreachable!("identifier with unknown owner")
+	fn name(&self, id: NameId) -> String {
+		self.names.borrow().get(id.0).to_owned()
 	}
-	fn ident<K: Kind>(&self, span: SimpleSpan, name: &str) -> Ident<K> {
-		#[cfg(feature = "strict")]
-		let generation = self.generation.get();
-		let mut ids = self.ids.borrow_mut();
-		match ids.entry(name.to_owned()) {
-			Entry::Occupied(v) => {
-				return Ident {
-					#[cfg(feature = "strict")]
-					generation,
-					#[cfg(feature = "strict")]
-					kind: K::id(),
-					id: *v.get(),
-					span,
-					_marker: PhantomData,
-				};
-			}
-			Entry::Vacant(v) => {
-				let id = self.max_id.get();
-				self.max_id.set(id.checked_add(1).expect("out of ids"));
-				v.insert(id);
-				Ident {
-					#[cfg(feature = "strict")]
-					generation,
-					#[cfg(feature = "strict")]
-					kind: K::id(),
-					id,
-					span,
-					_marker: PhantomData,
-				}
-			}
+	fn ident<K: Kind>(
+		&self,
+		span: SimpleSpan,
+		name: &str,
+		module: Option<Option<ModuleId>>,
+	) -> Ident<K> {
+		let name = NameId(self.names.borrow_mut().intern(name));
+		Ident {
+			#[cfg(feature = "strict")]
+			generation: self.generation.get(),
+			#[cfg(feature = "strict")]
+			kind: K::id(),
+			state: match module {
+				Some(module) => IdentState::Resolved(module, name),
+				None => IdentState::Unresolved(name),
+			},
+			span,
+			_marker: PhantomData,
 		}
 	}
+}
+
+pub(crate) fn intern_name(name: &str) -> NameId {
+	ALLOCATOR.with(|a| NameId(a.1.names.borrow_mut().intern(name)))
+}
+pub(crate) fn name_of(id: NameId) -> String {
+	ALLOCATOR.with(|a| a.1.name(id))
 }
 
 pub trait Kind {
@@ -89,29 +117,90 @@ pub fn in_allocator<T>(f: impl FnOnce() -> T) -> T {
 	v
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum IdentState {
+	Unresolved(NameId),
+	Resolved(Option<ModuleId>, NameId),
+}
+
 pub struct Ident<K> {
 	#[cfg(feature = "strict")]
 	generation: u32,
 	#[cfg(feature = "strict")]
 	kind: u8,
-	id: u16,
+	state: IdentState,
 	span: SimpleSpan,
 	_marker: PhantomData<fn() -> K>,
 }
 impl<K> Ident<K> {
+	pub(crate) fn name_id(&self) -> NameId {
+		match self.state {
+			IdentState::Unresolved(name) | IdentState::Resolved(_, name) => name,
+		}
+	}
 	pub fn name(&self) -> String {
-		ALLOCATOR.with(|a| a.1.name(self.id))
+		name_of(self.name_id())
 	}
 	pub fn span(&self) -> SimpleSpan {
 		self.span
 	}
+	pub fn is_resolved(&self) -> bool {
+		matches!(self.state, IdentState::Resolved(..))
+	}
+	pub fn module(&self) -> Option<ModuleId> {
+		self.key().0
+	}
+	pub fn qualified_name(&self) -> (Option<String>, String) {
+		(self.module().map(|m| m.path()), self.name())
+	}
+	pub(crate) fn set_resolved(&mut self, module: Option<ModuleId>, name: NameId) {
+		self.state = IdentState::Resolved(module, name);
+	}
+	pub(crate) fn erase(self) -> Ident<()> {
+		Ident {
+			#[cfg(feature = "strict")]
+			generation: self.generation,
+			#[cfg(feature = "strict")]
+			kind: self.kind,
+			state: self.state,
+			span: self.span,
+			_marker: PhantomData,
+		}
+	}
+	fn key(&self) -> (Option<ModuleId>, NameId) {
+		match self.state {
+			IdentState::Resolved(module, name) => (module, name),
+			IdentState::Unresolved(name) => panic!(
+				"identifier `{}` is used before name resolution",
+				name_of(name)
+			),
+		}
+	}
+	#[cfg(feature = "strict")]
+	fn assert_comparable(&self, other: &Self) {
+		assert!(
+			self.generation == other.generation && self.kind == other.kind,
+			"comparing idents of different generations"
+		);
+	}
+	#[cfg(not(feature = "strict"))]
+	fn assert_comparable(&self, _other: &Self) {}
 }
 impl<K: Kind> Ident<K> {
-	pub fn alloc((span, name): (SimpleSpan, &str)) -> Self {
+	fn alloc(span: SimpleSpan, name: &str, module: Option<Option<ModuleId>>) -> Self {
 		ALLOCATOR.with(|a| {
 			assert!(a.0.get(), "should be in allocator");
-			a.1.ident(span, name)
+			a.1.ident(span, name, module)
 		})
+	}
+	pub fn reference((span, name): (SimpleSpan, &str)) -> Self {
+		Self::alloc(span, name, None)
+	}
+	pub fn member((span, name): (SimpleSpan, &str)) -> Self {
+		Self::alloc(span, name, Some(None))
+	}
+	pub fn definition((span, name): (SimpleSpan, &str), module: ModuleId) -> Self {
+		Self::alloc(span, name, Some(Some(module)))
 	}
 	pub fn unchecked_cast<U: Kind>(v: Ident<U>) -> Self {
 		assert_eq!(
@@ -124,7 +213,7 @@ impl<K: Kind> Ident<K> {
 			generation: v.generation,
 			#[cfg(feature = "strict")]
 			kind: v.kind,
-			id: v.id,
+			state: v.state,
 			span: v.span,
 			_marker: PhantomData,
 		}
@@ -136,7 +225,7 @@ impl<K: Kind> Ident<K> {
 			generation: self.generation,
 			#[cfg(feature = "strict")]
 			kind: UnknownKind::id(),
-			id: self.id,
+			state: self.state,
 			span: self.span,
 			_marker: PhantomData,
 		}
@@ -150,28 +239,20 @@ impl<K> Clone for Ident<K> {
 impl<K> Copy for Ident<K> {}
 impl<K> PartialEq for Ident<K> {
 	fn eq(&self, other: &Ident<K>) -> bool {
-		#[cfg(feature = "strict")]
-		assert!(
-			self.generation == other.generation && self.kind == other.kind,
-			"comparing idents of different generations"
-		);
-		self.id == other.id
+		self.assert_comparable(other);
+		self.key() == other.key()
 	}
 }
 impl<K> Eq for Ident<K> {}
 impl<K> Ord for Ident<K> {
 	fn cmp(&self, other: &Ident<K>) -> Ordering {
-		#[cfg(feature = "strict")]
-		assert!(
-			self.generation == other.generation && self.kind == other.kind,
-			"comparing idents of different generations"
-		);
-		self.id.cmp(&other.id)
+		self.assert_comparable(other);
+		self.key().cmp(&other.key())
 	}
 }
 impl<K> Hash for Ident<K> {
 	fn hash<H: Hasher>(&self, state: &mut H) {
-		self.id.hash(state);
+		self.key().hash(state);
 	}
 }
 impl<K> PartialOrd for Ident<K> {
@@ -181,8 +262,7 @@ impl<K> PartialOrd for Ident<K> {
 }
 impl<K> Debug for Ident<K> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		let n = ALLOCATOR.with(|a| a.1.name(self.id));
-		write!(f, "{n}")
+		write!(f, "{}", self.name())
 	}
 }
 

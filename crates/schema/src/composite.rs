@@ -11,7 +11,8 @@ use crate::{
 	ids::DbIdent,
 	index::Check,
 	names::{
-		CompositeItemDefName, DbNativeType, FieldIdent, FieldKind, TypeDefName, TypeIdent, TypeKind,
+		CompositeItemDefName, DbNativeType, FieldIdent, FieldKind, MemberRename, TypeDefName,
+		TypeIdent, TypeKind,
 	},
 	scalar::PropagatedScalarData,
 	sql::Sql,
@@ -114,6 +115,7 @@ pub struct Composite {
 	pub annotations: AnnotationList,
 	pub fields: Vec<Field>,
 	pub attributes: Vec<CompositeAttribute>,
+	pub renames: Vec<MemberRename>,
 }
 def_name_impls!(Composite, TypeKind);
 
@@ -156,6 +158,7 @@ impl Composite {
 			annotations,
 			fields,
 			attributes,
+			renames: Vec::new(),
 		}
 	}
 	pub fn db_type(&self, rn: &RenameMap) -> DbNativeType {

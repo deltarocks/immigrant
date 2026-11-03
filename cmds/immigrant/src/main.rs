@@ -10,15 +10,13 @@ use std::{
 
 use anyhow::{Context, bail};
 use clap::{CommandFactory, FromArgMatches, Parser};
-use cli::{current_schema, display_reports, generate_sql, parse_schema, stored_schema};
-use file_diffs::{Migration, MigrationId, find_root, list, list_ids};
-use generator_postgres::Pg;
-use schema::{
-	diagnostics::Report,
-	parser::{LATEST_SCHEMA_VERSION, SchemaVersion},
-	root::Schema,
-	uid::RenameMap,
+use cli::{
+	NonDestructiveMode, configure_non_destructive, current_schema, display_reports, generate_sql,
+	parse_stored, stored_schema,
 };
+use file_diffs::{Migration, MigrationId, Snapshot, find_root, list, list_ids};
+use generator_postgres::Pg;
+use schema::{diagnostics::Report, parser::LATEST_SCHEMA_VERSION, root::Schema, uid::RenameMap};
 
 #[derive(Parser)]
 #[clap(author, version, allow_external_subcommands = true)]
@@ -41,6 +39,10 @@ enum Opts {
 		before_down_sql: Option<String>,
 		#[clap(long)]
 		after_down_sql: Option<String>,
+		/// Prevent data loss: `fail` refuses to drop tables and columns, `keep` renames them to
+		/// `obsolete_<id>_<name>` using the new migration id, any other value is used as the id.
+		#[clap(long)]
+		non_destructive: Option<NonDestructiveMode>,
 	},
 	/// Show the difference between stored and uncommited schema.
 	Diff,
@@ -177,6 +179,7 @@ fn main() -> anyhow::Result<()> {
 			after_up_sql,
 			before_down_sql,
 			after_down_sql,
+			non_destructive,
 		} => {
 			let root = find_root(&current_dir()?)?;
 			let list = list(&root)?;
@@ -210,6 +213,8 @@ fn main() -> anyhow::Result<()> {
 				after_down_sql,
 				current_str.clone(),
 			);
+			let fail_on_data_loss =
+				configure_non_destructive(&mut migration, non_destructive.as_ref(), id.id);
 
 			if should_use_editor {
 				bail!("$EDITOR usage is not yet supported")
@@ -234,7 +239,7 @@ fn main() -> anyhow::Result<()> {
 				// }
 			}
 
-			migration.to_diff(original_str.clone())?;
+			migration.to_diff(&original_str)?;
 
 			if migration.is_noop() {
 				println!("No changes found");
@@ -253,8 +258,7 @@ fn main() -> anyhow::Result<()> {
 
 			generate_sql(
 				&migration,
-				&original_str,
-				&current_str,
+				fail_on_data_loss,
 				&original,
 				&current,
 				&rn,
@@ -267,10 +271,10 @@ fn main() -> anyhow::Result<()> {
 			let root = find_root(&current_dir()?)?;
 			let list = list(&root)?;
 
-			let (original_str, original, mut original_report, orig_rn) =
+			let (_, original, mut original_report, orig_rn) =
 				stored_schema(&list).context("failed to load past migrations")?;
 
-			let (current_str, current, mut current_report, current_rn) =
+			let (_, current, mut current_report, current_rn) =
 				current_schema(&root).context("failed to parse current schema")?;
 
 			let mut rn = orig_rn;
@@ -285,7 +289,7 @@ fn main() -> anyhow::Result<()> {
 				&mut original_report,
 				&mut current_report,
 			);
-			if display_reports(&original_str, &current_str, original_report, current_report) {
+			if display_reports(original_report, current_report) {
 				bail!("errors are reported, cannot continue.\nPartial output:\n{up}");
 			}
 			println!("{up}")
@@ -300,29 +304,24 @@ fn main() -> anyhow::Result<()> {
 		Opts::RegenerateSql => {
 			let mut root = find_root(&current_dir()?)?;
 			let list = list(&root)?;
-			let mut current_schema_str = String::new();
+			let mut current_sources = Snapshot::default();
 			let mut current_schema = Schema::default();
 			let mut rn = RenameMap::default();
 			let mut schema_version = 1;
 			for (id, migration, _) in list {
-				let old_schema_str = current_schema_str.clone();
-				current_schema_str = migration.apply_diff(current_schema_str)?;
+				current_sources = migration.apply_diff(current_sources)?;
 				schema_version = schema_version.max(migration.schema_version);
 				let mut crn = RenameMap::default();
-				let (updated_schema, report) = parse_schema(
-					&current_schema_str,
-					SchemaVersion::Stored(schema_version),
-					&mut crn,
-				)?;
+				let (updated_schema, report) =
+					parse_stored(&current_sources, schema_version, &mut crn)?;
 				rn.merge(crn);
-				generator_postgres::validate::validate(&current_schema_str, &updated_schema, &rn);
+				generator_postgres::validate::validate(&updated_schema, &rn);
 
 				root.push(&id.dirname);
 				let old_report = Report::new();
 				generate_sql(
 					&migration,
-					&old_schema_str,
-					&current_schema_str,
+					false,
 					&current_schema,
 					&updated_schema,
 					&rn,

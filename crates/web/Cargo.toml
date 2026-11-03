@@ -13,7 +13,11 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 console_error_panic_hook = "0.1.7"
+file-diffs.workspace = true
 generator-postgres.workspace = true
-schema.workspace = true
+hi-doc.workspace = true
+js-sys = "0.3.85"
+schema = { workspace = true, features = ["hi-doc"] }
+slug = "0.1.6"
 wasm-bindgen = "=0.2.108"
 getrandom = { version = "0.3", features = ["wasm_js"] }

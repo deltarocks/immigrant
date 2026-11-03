@@ -1,4 +1,5 @@
 use std::{
+	collections::BTreeMap,
 	result,
 	sync::{self, atomic::AtomicUsize},
 };
@@ -11,18 +12,20 @@ use crate::{
 	composite::{Composite, CompositeAttribute, Field, FieldAttribute},
 	diagnostics::Report,
 	extension::{Extension, ExtensionAttribute},
-	ids::{DbIdent, in_allocator},
+	ids::{DbIdent, ModuleId},
 	index::{Check, Index, OpClass, PrimaryKey, UniqueConstraint, Using, With},
 	mixin::Mixin,
 	names::{
 		ColumnIdent, DbProcedure, DefName, EnumItemDefName, ExtensionDefName, FieldIdent,
-		MixinIdent, RoleDefName, RoleIdent, TableDefName, TableIdent, TypeDefName, TypeIdent,
-		ViewDefName,
+		MemberRename, MixinIdent, RoleDefName, RoleIdent, TableDefName, TableIdent, TypeDefName,
+		TypeIdent, ViewDefName,
 	},
+	project::parse_project,
 	role::{Permission, Policy, Role, RoleAttribute, RoleGrant},
 	root::{Item, Schema, SchemaProcessOptions},
 	scalar::{Enum, EnumItem, InlineSqlType, InlineSqlTypePart, Scalar, ScalarAttribute},
-	span::{SimpleSpan, SourceId, register_source},
+	source::ResolvedSpec,
+	span::{SimpleSpan, SourceId},
 	sql::{Sql, SqlOp, SqlUnOp},
 	table::{ForeignKey, OnDelete, Table, TableAttribute},
 	uid::RenameMap,
@@ -42,14 +45,89 @@ enum InlinePart<T> {
 // V1: views were security_invoker = false by default, making underlying tables RLS ignored during SELECT.
 pub const LATEST_SCHEMA_VERSION: u32 = 2;
 
+pub const ROOT_MODULE: &str = "db.schema";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SchemaVersion {
 	Current,
 	Stored(u32),
 }
 
+#[derive(Clone)]
+pub(crate) struct AliasDecl {
+	pub name: (SimpleSpan, String),
+	pub target: (SimpleSpan, String),
+}
+
+#[derive(Clone)]
+pub(crate) struct ImportName {
+	pub name: (SimpleSpan, String),
+	pub local: Option<(SimpleSpan, String)>,
+}
+impl ImportName {
+	pub fn local(&self) -> &(SimpleSpan, String) {
+		self.local.as_ref().unwrap_or(&self.name)
+	}
+}
+
+#[derive(Clone)]
+pub(crate) struct ImportDecl {
+	pub external: bool,
+	pub path: (SimpleSpan, String),
+	pub names: Vec<ImportName>,
+}
+
+#[derive(Clone)]
+pub(crate) struct RenameDecl {
+	pub old: (SimpleSpan, String),
+	pub from: Option<(SimpleSpan, String)>,
+	pub new: (SimpleSpan, String),
+}
+
+pub(crate) struct ParsedModule {
+	pub items: Vec<Item>,
+	pub ranges: Vec<Option<(usize, usize)>>,
+	pub aliases: Vec<AliasDecl>,
+	pub imports: Vec<ImportDecl>,
+	pub renames: Vec<RenameDecl>,
+}
+
+enum TopLevel {
+	Item(Item, Vec<Scalar>, (usize, usize)),
+	Alias(AliasDecl),
+	Import(ImportDecl),
+	Renamed(RenameDecl),
+}
+
+enum TableStmt {
+	Attribute(TableAttribute),
+	Renamed(MemberRename),
+}
+fn split_table_stmts(stmts: Vec<TableStmt>) -> (Vec<TableAttribute>, Vec<MemberRename>) {
+	let mut attributes = Vec::new();
+	let mut renames = Vec::new();
+	for stmt in stmts {
+		match stmt {
+			TableStmt::Attribute(a) => attributes.push(a),
+			TableStmt::Renamed(r) => renames.push(r),
+		}
+	}
+	(attributes, renames)
+}
+
+enum EnumEntry {
+	Item(Vec<String>, (SimpleSpan, String, Option<String>)),
+	Renamed(MemberRename),
+}
+
+enum CompositeStmt {
+	Attribute(CompositeAttribute),
+	Renamed(MemberRename),
+}
+
 struct S {
 	id: SourceId,
+	module: ModuleId,
 	last_inline_scalar: AtomicUsize,
 	version: u32,
 }
@@ -60,7 +138,7 @@ impl S {
 			self.last_inline_scalar
 				.fetch_add(1, sync::atomic::Ordering::Relaxed)
 		);
-		let ident = TypeIdent::alloc((span, &name));
+		let ident = TypeIdent::definition((span, &name), self.module);
 		let scalar = Scalar::new(
 			vec!["Inlined scalar".to_owned()],
 			AnnotationList {
@@ -76,13 +154,88 @@ impl S {
 }
 parser! {
 grammar schema_parser() for str {
-pub(super) rule root(s:&S) -> Schema = _ version_directive()? _ t:item(s)**_ _ {
-	let mut out = Vec::new();
-	for (item, scalars) in t {
-		out.extend(scalars.into_iter().map(Item::Scalar));
-		out.push(item);
+pub(super) rule root(s:&S) -> ParsedModule = _ version_directive()? _ t:toplevel(s)**_ _ {
+	let mut items = Vec::new();
+	let mut ranges = Vec::new();
+	let mut aliases = Vec::new();
+	let mut imports = Vec::new();
+	let mut renames = Vec::new();
+	for t in t {
+		match t {
+			TopLevel::Item(item, scalars, range) => {
+				ranges.extend(scalars.iter().map(|_| None));
+				items.extend(scalars.into_iter().map(Item::Scalar));
+				ranges.push(Some(range));
+				items.push(item);
+			}
+			TopLevel::Alias(alias) => aliases.push(alias),
+			TopLevel::Import(import) => imports.push(import),
+			TopLevel::Renamed(rename) => renames.push(rename),
+		}
 	}
-	Schema(out)
+	ParsedModule {
+		items,
+		ranges,
+		aliases,
+		imports,
+		renames,
+	}
+}
+
+rule toplevel(s:&S) -> TopLevel
+= i:import(s) {TopLevel::Import(i)}
+/ a:alias(s) {TopLevel::Alias(a)}
+/ r:renamed(s) {TopLevel::Renamed(r)}
+/ b:position!() i:item(s) e:position!() {TopLevel::Item(i.0, i.1, (b, e))}
+
+rule renamed(s:&S) -> RenameDecl =
+	docs() "@renamed" _ old:code_ident(s) _
+	from:("from" _ b:position!() p:str() e:position!() _ {(SimpleSpan::new(s.id, b as u32, e as u32), p.to_owned())})?
+	"to" _ new:code_ident(s) _ ";" {
+	RenameDecl {
+		old: (old.0, old.1.to_owned()),
+		from,
+		new: (new.0, new.1.to_owned()),
+	}
+}
+rule member_renamed(s:&S) -> MemberRename =
+	"@renamed" _ old:code_ident(s) _ "to" _ new:code_ident(s) {
+	MemberRename {
+		old: (old.0, old.1.to_owned()),
+		new: (new.0, new.1.to_owned()),
+	}
+}
+rule table_stmt(s:&S) -> TableStmt
+= r:member_renamed(s) {TableStmt::Renamed(r)}
+/ a:table_attribute(s) {TableStmt::Attribute(a)}
+rule composite_stmt(s:&S) -> CompositeStmt
+= r:member_renamed(s) {CompositeStmt::Renamed(r)}
+/ a:composite_attribute(s) {CompositeStmt::Attribute(a)}
+
+rule import_name(s:&S) -> ImportName =
+	name:code_ident(s) local:(_ "as" _ l:code_ident(s) {l})? {
+	ImportName {
+		name: (name.0, name.1.to_owned()),
+		local: local.map(|l| (l.0, l.1.to_owned())),
+	}
+}
+rule import(s:&S) -> ImportDecl =
+	docs() "import" _ external:("@external" _)?
+	names:("{" _ n:import_name(s)**comma() trailing_comma() "}" _ "from" _ {n})?
+	b:position!() path:str() e:position!() _ ";" {
+	ImportDecl {
+		external: external.is_some(),
+		path: (SimpleSpan::new(s.id, b as u32, e as u32), path.to_owned()),
+		names: names.unwrap_or_default(),
+	}
+}
+
+rule alias(s:&S) -> AliasDecl =
+	docs() "alias" _ name:code_ident(s) _ "=" _ target:code_ident(s) _ ";" {
+	AliasDecl {
+		name: (name.0, name.1.to_owned()),
+		target: (target.0, target.1.to_owned()),
+	}
 }
 
 rule item(s:&S) -> (Item, Vec<Scalar>)
@@ -99,42 +252,48 @@ rule mixin(s:&S) -> (Mixin, Vec<Scalar>) =
 	docs:docs()
 	annotations:annotation_list(s) _
 	"@mixin" _ name:code_ident(s) _ "{" _
-		mixins:("@mixin" _ f:code_ident(s) _ ";" {MixinIdent::alloc(f)})**_ _
+		mixins:("@mixin" _ f:code_ident(s) _ ";" {MixinIdent::reference(f)})**_ _
 		fields:(f:table_field(s) _ ";" {f})++_ _
-		attributes:(a:table_attribute(s) _ ";" {a})**_ _
+		stmts:(a:table_stmt(s) _ ";" {a})**_ _
 		foreign_keys:(f:foreign_key(s) _ ";" {f})**_ _
 	"}" _ ";" {{
 	let (fields, scalars): (Vec<Column>, Vec<Option<Scalar>>) = fields.into_iter().unzip();
-	(Mixin::new(
+	let (attributes, renames) = split_table_stmts(stmts);
+	let mut mixin = Mixin::new(
 		docs,
 		annotations,
-		MixinIdent::alloc(name),
+		MixinIdent::definition(name, s.module),
 		fields,
 		attributes,
 		foreign_keys,
 		mixins,
-	), scalars.into_iter().flatten().collect())
+	);
+	mixin.renames = renames;
+	(mixin, scalars.into_iter().flatten().collect())
 }};
 
 rule table(s:&S) -> (Table, Vec<Scalar>) =
 	docs:docs()
 	annotations:annotation_list(s) _
 	"table" _ name:def_name(s) _ "{" _
-		mixins:("@mixin" _ f:code_ident(s) _ ";" {MixinIdent::alloc(f)})**_ _
+		mixins:("@mixin" _ f:code_ident(s) _ ";" {MixinIdent::reference(f)})**_ _
 		fields:(f:table_field(s) _ ";" {f})++_ _
-		attributes:(a:table_attribute(s) _ ";" {a})**_ _
+		stmts:(a:table_stmt(s) _ ";" {a})**_ _
 		foreign_keys:(f:foreign_key(s) _ ";" {f})**_ _
 	"}" _ ";" {{
 	let (fields, scalars): (Vec<Column>, Vec<Option<Scalar>>) = fields.into_iter().unzip();
-	(Table::new(
+	let (attributes, renames) = split_table_stmts(stmts);
+	let mut table = Table::new(
 		docs,
 		annotations,
-		TableDefName::alloc(name),
+		TableDefName::definition(name, s.module),
 		fields,
 		attributes,
 		foreign_keys,
 		mixins,
-	), scalars.into_iter().flatten().collect())
+	);
+	table.renames = renames;
+	(table, scalars.into_iter().flatten().collect())
 }};
 
 rule role_attribute(s:&S) -> RoleAttribute
@@ -146,7 +305,7 @@ rule role(s:&S) -> Role =
 	"role" _ name:def_name(s) _ "{" _
 		attributes:(a:role_attribute(s) _ ";" {a})**_ _
 	"}" _ ";" {
-	Role::new(docs, annotations, RoleDefName::alloc(name), attributes)
+	Role::new(docs, annotations, RoleDefName::definition(name, s.module), attributes)
 };
 rule extension_attribute(s:&S) -> ExtensionAttribute
 = "version" _ v:str() {ExtensionAttribute::Version(v.to_owned())}
@@ -158,7 +317,7 @@ rule extension(s:&S) -> Extension =
 	"extension" _ name:def_name(s) _
 		attributes:("{" _ a:(a:extension_attribute(s) _ ";" {a})**_ _ "}" _ {a})?
 	";" {
-	Extension::new(docs, annotations, ExtensionDefName::alloc(name), attributes.unwrap_or_default())
+	Extension::new(docs, annotations, ExtensionDefName::definition(name, s.module), attributes.unwrap_or_default())
 };
 rule permission() -> Permission
 = "select" {Permission::Select}
@@ -168,18 +327,18 @@ rule permission() -> Permission
 rule role_grant(s:&S) -> RoleGrant
 = "@role" _ role:code_ident(s) _ "{" _ p:(p:permission() _ ";" {p})**_ _ "}" {
 	RoleGrant {
-		role: RoleIdent::alloc(role),
+		role: RoleIdent::reference(role),
 		permissions: p,
 	}
 }
 rule policy(s:&S) -> Policy
 = "@policy" _ "." _ "for" _ "(" _ role:code_ident(s) _ ")" _ name:db_ident()? _ "(" _ check:sql(s) _ ")" {
-	Policy::new(name.map(DbIdent::new), RoleIdent::alloc(role), check)
+	Policy::new(name.map(DbIdent::new), RoleIdent::reference(role), check)
 }
 
 rule definition_part(s:&S) -> DefinitionPart =
-	i:code_ident(s) _ "." _ j:code_ident(s) {DefinitionPart::ColumnRef(TableIdent::alloc(i), ColumnIdent::alloc(j))}
-/	i:code_ident(s) {DefinitionPart::TableRef(TableIdent::alloc(i))}
+	i:code_ident(s) _ "." _ j:code_ident(s) {DefinitionPart::ColumnRef(TableIdent::reference(i), ColumnIdent::member(j))}
+/	i:code_ident(s) {DefinitionPart::TableRef(TableIdent::reference(i))}
 rule definition(s:&S) -> Definition = parts:(
 	inline(<definition_part(s)>)
 /	compat_only(s, <custom_inline(<definition_part(s)>, <"$$">, <"$$">, <"${">, <"}">)>)
@@ -190,7 +349,7 @@ rule definition(s:&S) -> Definition = parts:(
 	}).collect())
 }
 rule inline_sql_part(s:&S) -> InlineSqlTypePart =
-	i:code_ident(s) {InlineSqlTypePart::TypeRef(TypeIdent::alloc(i))}
+	i:code_ident(s) {InlineSqlTypePart::TypeRef(TypeIdent::reference(i))}
 rule inline_sql(s:&S) -> InlineSqlType = parts:(
 	inline(<inline_sql_part(s)>)
 	/ compat_only(s, <custom_inline(<inline_sql_part(s)>, <"$$">, <"$$">, <"${">, <"}">)>)
@@ -219,7 +378,7 @@ rule view(s:&S) -> View =
 	View::new(
 		docs,
 		annotations,
-		ViewDefName::alloc(name),
+		ViewDefName::definition(name, s.module),
 		materialized.is_some(),
 		attributes,
 		definition,
@@ -228,29 +387,55 @@ rule view(s:&S) -> View =
 rule enum(s:&S) -> Enum =
 	docs:docs()
 	annotations:annotation_list(s) _
-	"enum" _ name:def_name(s) _ "{" _ items:(
-		docs:docs()
+	"enum" _ name:def_name(s) _ "{" _ entries:(
+		r:member_renamed(s) {EnumEntry::Renamed(r)}
+	/	docs:docs()
 		name:def_name(s)
-	{(docs, name)})++(_ ";" _) _ ";"? _ "}" _ ";" {
-	Enum::new(docs, annotations, TypeDefName::alloc(name), items.into_iter()
-		.map(|(docs, name)| EnumItem::new(docs, EnumItemDefName::alloc(name))).collect()
-	)
+	{EnumEntry::Item(docs, (name.0, name.1.to_owned(), name.2.map(str::to_owned)))})++(_ ";" _) _ ";"? _ "}" _ ";" {?
+	let mut items = Vec::new();
+	let mut renames = Vec::new();
+	for entry in entries {
+		match entry {
+			EnumEntry::Item(docs, (span, code, db)) => items.push(EnumItem::new(
+				docs,
+				EnumItemDefName::member((span, &code, db.as_deref())),
+			)),
+			EnumEntry::Renamed(r) => renames.push(r),
+		}
+	}
+	if items.is_empty() {
+		return Err("enum variant");
+	}
+	let mut en = Enum::new(docs, annotations, TypeDefName::definition(name, s.module), items);
+	en.renames = renames;
+	Ok(en)
 };
 rule scalar(s:&S) -> Scalar =
 	docs:docs()
 	annotations:annotation_list(s) _
 	"scalar" _ name:def_name(s) _ "=" _ native:inline_sql(s) _ attributes:scalar_attribute(s)**_ ";" {
-	Scalar::new(docs, annotations, TypeDefName::alloc(name), native, attributes)
+	Scalar::new(docs, annotations, TypeDefName::definition(name, s.module), native, attributes)
 }
 rule composite(s:&S) -> Composite =
 	docs:docs()
 	annotations:annotation_list(s) _
 	"struct" _ name:def_name(s) _ "{" _
 		fields:(f:field(s) _ ";" {f})++_ _
-		attributes:(a:composite_attribute(s) _ ";" {a})**_ _
-	"}" _ ";" {
-	Composite::new(docs, annotations, TypeDefName::alloc(name), fields, attributes)
-}
+		stmts:(a:composite_stmt(s) _ ";" {a})**_ _
+	"}" _ ";" {{
+	let mut attributes = Vec::new();
+	let mut renames = Vec::new();
+	for stmt in stmts {
+		match stmt {
+			CompositeStmt::Attribute(a) => attributes.push(a),
+			CompositeStmt::Renamed(r) => renames.push(r),
+		}
+	}
+	let mut composite =
+		Composite::new(docs, annotations, TypeDefName::definition(name, s.module), fields, attributes);
+	composite.renames = renames;
+	composite
+}}
 rule field(s:&S) -> Field =
 	docs:docs()
 	name:def_name(s) _
@@ -259,9 +444,9 @@ rule field(s:&S) -> Field =
 	attributes:field_attribute(s)**_ {
 	Field::new(
 		docs,
-		DefName::alloc(name),
+		DefName::member(name),
 		n.is_some(),
-		TypeIdent::alloc(t.unwrap_or((name.0, name.1))),
+		TypeIdent::reference(t.unwrap_or((name.0, name.1))),
 		attributes
 	)
 }
@@ -271,7 +456,7 @@ rule maybe_inline_scalar(s:&S) -> (TypeIdent, Option<Scalar>) =
 		SimpleSpan::new(s.id, b as u32, e as u32),
 		ty,
 	)}
-/	i:code_ident(s) { (TypeIdent::alloc(i), None) }
+/	i:code_ident(s) { (TypeIdent::reference(i), None) }
 
 rule table_field(s:&S) -> (Column, Option<Scalar>) =
 	docs:docs()
@@ -283,10 +468,10 @@ rule table_field(s:&S) -> (Column, Option<Scalar>) =
 	foreign_key:partial_foreign_key(s)? {
 	let (ty, scalars) = match t {
 		Some(v) => v,
-		None => (TypeIdent::alloc((name.0, name.1)), None),
+		None => (TypeIdent::reference((name.0, name.1)), None),
 	};
 	(Column::new(
-		DefName::alloc(name),
+		DefName::member(name),
 		docs,
 		annotations,
 		n.is_some(),
@@ -372,7 +557,7 @@ rule partial_foreign_key(s:&S) -> PartialForeignKey
 		fk: ForeignKey::new(
 			name.map(DbIdent::new),
 			None,
-			TableIdent::alloc(target),
+			TableIdent::reference(target),
 			target_fields,
 			on_delete.unwrap_or(OnDelete::Noop),
 		)
@@ -403,7 +588,7 @@ rule index(s:&S) -> Index
 	with:("." _ "with" _ "(" _ with:str_escaping() _ ")" _ {With(with)})?
 	name:db_ident()? _ f:index_fields(s)? {Index::new(name.map(DbIdent::new), unq.is_some(), f.unwrap_or_default().into_iter().map(|v| (v, None)).collect(), using, default_opclass, with)}
 
-rule index_fields(s:&S) -> Vec<ColumnIdent> = "(" _ i:code_ident(s)**comma() trailing_comma() ")" {i.into_iter().map(ColumnIdent::alloc).collect()}
+rule index_fields(s:&S) -> Vec<ColumnIdent> = "(" _ i:code_ident(s)**comma() trailing_comma() ")" {i.into_iter().map(ColumnIdent::member).collect()}
 
 rule code_ident(s:&S) -> (SimpleSpan, &'input str) = b:position!() n:$(['a'..='z' | 'A'..='Z'] ['a'..='z' | 'A'..='Z' | '_' | '0'..='9']*) e:position!() {(SimpleSpan::new(s.id, b as u32, e as u32), n)};
 rule db_ident() -> &'input str = str()
@@ -462,8 +647,8 @@ rule sql(s:&S) -> Sql
 	"+" _ b:@ {Sql::UnOp(SqlUnOp::Plus, h(b))}
 	"!" _ b:@ {Sql::UnOp(SqlUnOp::Not, h(b))}
 	--
-	a:(@) _ "::" _ ty:code_ident(s) {Sql::Cast(h(a), TypeIdent::alloc(ty))}
-	a:(@) _ "." _ f:code_ident(s) {Sql::GetField(h(a), FieldIdent::alloc(f))}
+	a:(@) _ "::" _ ty:code_ident(s) {Sql::Cast(h(a), TypeIdent::reference(ty))}
+	a:(@) _ "." _ f:code_ident(s) {Sql::GetField(h(a), FieldIdent::member(f))}
 	--
 	e:sql_basic(s) {e}
 }
@@ -478,7 +663,7 @@ rule sql_basic(s:&S) -> Sql
 / "true" {Sql::Boolean(true)}
 / "false" {Sql::Boolean(false)}
 / i:code_ident(s) _ "(" _ e:sql(s)**comma() trailing_comma() ")" {Sql::Call(DbProcedure::new(i.1), e)}
-/ i:code_ident(s) {Sql::Ident(ColumnIdent::alloc(i))}
+/ i:code_ident(s) {Sql::Ident(ColumnIdent::member(i))}
 / s:str() {Sql::String(s.to_owned())}
 / n:$(['0'..='9']+) {Sql::Number(n.parse().unwrap())}
 
@@ -507,15 +692,13 @@ fn scan_version_directive(v: &str) -> Option<(u32, u32, u32)> {
 	Some((version, start as u32, end as u32))
 }
 
-pub fn parse(
+pub(crate) fn source_version(
 	v: &str,
+	span: SourceId,
 	schema_version: SchemaVersion,
-	opts: &SchemaProcessOptions,
-	rn: &mut RenameMap,
 	report: &mut Report,
-) -> Result<Schema> {
-	let span = register_source(v.to_string());
-	let version = match schema_version {
+) -> Result<u32> {
+	Ok(match schema_version {
 		SchemaVersion::Current => {
 			if let Some((version, start, end)) = scan_version_directive(v)
 				&& version != LATEST_SCHEMA_VERSION
@@ -538,26 +721,41 @@ pub fn parse(
 			}
 			version
 		}
-	};
-	let mut s = in_allocator(|| {
-		schema_parser::root(
-			v,
-			&S {
-				id: span,
-				last_inline_scalar: AtomicUsize::default(),
-				version,
-			},
-		)
-		.map_err(|e| {
-			report.error("parse error").annotate(
-				e.to_string(),
-				SimpleSpan::new(span, e.location.offset as u32, e.location.offset as u32),
-			);
-		})
-	})?;
-	s.process(opts, rn, report);
-	// if report.is_error() {
-	// 	return Err(None)
-	// }
-	Ok(s)
+	})
+}
+
+pub(crate) fn parse_module(
+	v: &str,
+	span: SourceId,
+	module: ModuleId,
+	version: u32,
+	report: &mut Report,
+) -> Result<ParsedModule> {
+	schema_parser::root(
+		v,
+		&S {
+			id: span,
+			module,
+			last_inline_scalar: AtomicUsize::default(),
+			version,
+		},
+	)
+	.map_err(|e| {
+		report.error("parse error").annotate(
+			e.to_string(),
+			SimpleSpan::new(span, e.location.offset as u32, e.location.offset as u32),
+		);
+	})
+}
+
+pub fn parse(
+	v: &str,
+	schema_version: SchemaVersion,
+	opts: &SchemaProcessOptions,
+	rn: &mut RenameMap,
+	report: &mut Report,
+) -> Result<Schema> {
+	let sources = BTreeMap::from([(ROOT_MODULE.to_owned(), v.to_owned())]);
+	let root = ResolvedSpec::root(ROOT_MODULE).expect("valid root");
+	parse_project(&[root], &sources, schema_version, opts, rn, report).map(|p| p.schema)
 }

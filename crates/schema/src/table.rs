@@ -11,8 +11,8 @@ use crate::{
 	index::{Check, PrimaryKey, UniqueConstraint},
 	mixin::Mixin,
 	names::{
-		ColumnIdent, DbColumn, DbForeignKey, DbNativeType, ForeignKeyKind, MixinIdent,
-		TableDefName, TableIdent, TableKind, TypeIdent,
+		ColumnIdent, DbColumn, DbForeignKey, DbNativeType, ForeignKeyKind, MemberRename,
+		MixinIdent, TableDefName, TableIdent, TableKind, TypeIdent,
 	},
 	role::{Policy, RoleGrant},
 	scalar::PropagatedScalarData,
@@ -30,6 +30,7 @@ pub struct Table {
 	pub attributes: Vec<TableAttribute>,
 	pub foreign_keys: Vec<ForeignKey>,
 	pub mixins: Vec<MixinIdent>,
+	pub renames: Vec<MemberRename>,
 }
 def_name_impls!(Table, TableKind);
 impl Table {
@@ -51,6 +52,7 @@ impl Table {
 			attributes,
 			foreign_keys,
 			mixins,
+			renames: Vec::new(),
 		}
 	}
 	pub fn primary_key(&self) -> Option<&PrimaryKey> {
@@ -73,8 +75,10 @@ impl Table {
 			attributes,
 			foreign_keys,
 			mixins,
+			renames,
 			..
 		} = mixin;
+		self.renames.extend(renames.iter().cloned());
 		self.docs.extend_from_slice(docs);
 		self.annotations
 			.annotations

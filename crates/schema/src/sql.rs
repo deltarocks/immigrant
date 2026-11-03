@@ -114,7 +114,7 @@ impl Sql {
 		copy.visit(&mut collector);
 		collector.columns
 	}
-	fn visit(&mut self, v: &mut impl SqlVisitor) {
+	pub(crate) fn visit(&mut self, v: &mut impl SqlVisitor) {
 		v.handle(self);
 		match self {
 			Sql::Cast(s, t) => {

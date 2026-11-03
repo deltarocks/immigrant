@@ -1,0 +1,71 @@
+!!!TEST plugins referencing each other
+!!!ROOTS @main/db.schema @logseq/db.schema
+!!!FILE @main/db.schema
+import { Page } from "@logseq/db.schema";
+import { page_id } from "@logseq/ids.schema";
+scalar user_id = sql"INTEGER";
+table User {
+	id: user_id @primary_key;
+	home: page_id ~ Page(id);
+};
+!!!FILE @logseq/db.schema
+import { User, user_id } from "@main/db.schema";
+import { page_id } from "./ids.schema";
+table Page {
+	id: page_id @primary_key;
+	owner: user_id ~ User(id);
+};
+!!!FILE @logseq/ids.schema
+scalar page_id = sql"INTEGER";
+!!!UPDATE root removed, but still imported by another root
+!!!ROOTS @main/db.schema
+!!!FILE @main/db.schema
+import { Page } from "@logseq/db.schema";
+import { page_id } from "@logseq/ids.schema";
+scalar user_id = sql"INTEGER";
+table User {
+	id: user_id @primary_key;
+	home: page_id ~ Page(id);
+};
+!!!FILE @logseq/db.schema
+import { User, user_id } from "@main/db.schema";
+import { page_id } from "./ids.schema";
+table Page {
+	id: page_id @primary_key;
+	owner: user_id ~ User(id);
+};
+!!!FILE @logseq/ids.schema
+scalar page_id = sql"INTEGER";
+!!!UPDATE plugin removed
+!!!ROOTS @main/db.schema
+!!!FILE @main/db.schema
+scalar user_id = sql"INTEGER";
+table User {
+	id: user_id @primary_key;
+};
+!!!RESULT
+-- updated: plugins referencing each other --
+CREATE DOMAIN user_id AS INTEGER;
+CREATE DOMAIN page_id AS INTEGER;
+CREATE TABLE users (
+	id user_id NOT NULL
+,	home page_id NOT NULL
+,	CONSTRAINT users_id_pkey PRIMARY KEY(id)
+);
+CREATE TABLE pages (
+	id page_id NOT NULL
+,	owner user_id NOT NULL
+,	CONSTRAINT pages_id_pkey PRIMARY KEY(id)
+);
+ALTER TABLE users ADD CONSTRAINT users_home_fk FOREIGN KEY(home) REFERENCES pages(id);
+ALTER TABLE pages ADD CONSTRAINT pages_owner_fk FOREIGN KEY(owner) REFERENCES users(id);
+-- updated: root removed, but still imported by another root --
+
+-- updated: plugin removed --
+ALTER TABLE users DROP CONSTRAINT users_home_fk;
+ALTER TABLE users DROP COLUMN home;
+DROP TABLE pages;
+DROP DOMAIN page_id;
+-- updated: cleanup schema changes --
+DROP TABLE users;
+DROP DOMAIN user_id;

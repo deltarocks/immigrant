@@ -1,5 +1,5 @@
 use std::{
-	collections::{BTreeMap, HashSet},
+	collections::{BTreeMap, HashMap, HashSet},
 	mem,
 	ops::{Deref, DerefMut},
 	str::FromStr,
@@ -19,6 +19,7 @@ use crate::{
 	role::Role,
 	root::{Item, Schema},
 	scalar::{Enum, Scalar, ScalarAttribute},
+	span::SimpleSpan,
 	sql::Sql,
 	table::{Table, TableAttribute},
 	uid::{RenameExt, RenameMap},
@@ -586,5 +587,44 @@ pub fn check_unique_identifiers(schema: &Schema, diagnostics: &mut Report) {
 				check_unique(seen, v.id().to_unknown(), diagnostics);
 			}
 		}
+	}
+}
+
+fn check_unique_db(
+	seen: &mut HashMap<String, SimpleSpan>,
+	db: &str,
+	span: SimpleSpan,
+	diagnostics: &mut Report,
+) {
+	if let Some(previous) = seen.get(db) {
+		diagnostics
+			.error(format!(
+				"database name `{db}` is used by multiple items, consider setting an explicit database name"
+			))
+			.annotate("declared here", span)
+			.annotate("previously declared here", *previous);
+		return;
+	}
+	seen.insert(db.to_owned(), span);
+}
+
+pub fn check_unique_db_identifiers(schema: &Schema, rn: &RenameMap, diagnostics: &mut Report) {
+	let types = &mut HashMap::new();
+	let roles = &mut HashMap::new();
+	let extensions = &mut HashMap::new();
+	for item in &schema.0 {
+		let (seen, db, span) = match item {
+			Item::Table(t) => (&mut *types, t.db(rn).raw().to_owned(), t.id().span()),
+			Item::View(v) => (&mut *types, v.db(rn).raw().to_owned(), v.id().span()),
+			Item::Enum(e) => (&mut *types, e.db(rn).raw().to_owned(), e.id().span()),
+			Item::Composite(c) => (&mut *types, c.db(rn).raw().to_owned(), c.id().span()),
+			Item::Scalar(s) if !s.inlined() => {
+				(&mut *types, s.db(rn).raw().to_owned(), s.id().span())
+			}
+			Item::Role(r) => (&mut *roles, r.db(rn).raw().to_owned(), r.id().span()),
+			Item::Extension(e) => (&mut *extensions, e.db(rn).raw().to_owned(), e.id().span()),
+			Item::Scalar(_) | Item::Mixin(_) => continue,
+		};
+		check_unique_db(seen, &db, span, diagnostics);
 	}
 }

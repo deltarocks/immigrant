@@ -39,15 +39,20 @@ pub mod ids;
 pub mod names;
 
 pub mod parser;
+pub mod project;
+pub mod resolve;
+pub mod source;
 
 pub mod annotation;
 
 mod changelist;
 pub mod renamelist;
 
-pub use changelist::{ChangeList, IsCompatible, IsIsomorph, mk_change_list};
+pub use changelist::{
+	ChangeList, IsCompatible, IsIsomorph, mk_change_list, mk_change_list_with_hints,
+};
 
-mod span;
+pub mod span;
 pub mod uid;
 pub use uid::HasUid;
 
@@ -302,6 +307,19 @@ impl SchemaItem<'_> {
 			SchemaItem::Composite(_) => false,
 			SchemaItem::View(_) => false,
 		}
+	}
+	pub fn is_stub(&self) -> bool {
+		self.schema().is_stub(self.uid())
+	}
+}
+impl SchemaRole<'_> {
+	pub fn is_stub(&self) -> bool {
+		self.schema.is_stub(self.uid())
+	}
+}
+impl SchemaExtension<'_> {
+	pub fn is_stub(&self) -> bool {
+		self.schema.is_stub(self.uid())
 	}
 }
 impl HasUid for SchemaItem<'_> {

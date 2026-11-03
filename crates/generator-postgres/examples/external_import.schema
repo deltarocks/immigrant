@@ -1,0 +1,184 @@
+!!!TEST external stubs are referenced, never created
+import @external { Invoice, invoice_id, Billing } from "../billing/db.schema";
+table Payment {
+	invoice: invoice_id ~ Invoice(id);
+	@role Billing {
+		select;
+	};
+};
+!!!FILE ../billing/db.schema
+import { Customer, customer_id } from "./customers.schema";
+role Billing {
+	default {
+		select;
+		insert;
+	};
+};
+scalar invoice_id = sql"INTEGER" @index;
+table Invoice {
+	id: invoice_id @primary_key;
+	customer: customer_id ~ Customer(id);
+	total: sql"NUMERIC" @check (_ > 0);
+	@index(customer);
+	@role Billing {
+		update;
+	};
+};
+table Unrelated {
+	id: invoice_id;
+};
+!!!FILE ../billing/customers.schema
+scalar customer_id = sql"INTEGER";
+table Customer {
+	id: customer_id @primary_key;
+};
+!!!UPDATE upstream renames table and role, changes unrelated parts
+import @external { Invoice, invoice_id, Billing } from "../billing/db.schema";
+table Payment {
+	invoice: invoice_id ~ Invoice(id);
+	@role Billing {
+		select;
+	};
+};
+!!!FILE ../billing/db.schema
+import { Customer, customer_id } from "./customers.schema";
+role Billing "accounting" {
+	default {
+		select;
+	};
+};
+scalar invoice_id = sql"INTEGER" @index;
+table Invoice "bills" {
+	id: invoice_id @primary_key;
+	customer: customer_id ~ Customer(id);
+	total: sql"NUMERIC" @check (_ > 1);
+	note: sql"TEXT";
+	@index(customer);
+};
+table Unrelated {
+	id: invoice_id;
+	other: invoice_id;
+};
+!!!FILE ../billing/customers.schema
+scalar customer_id = sql"INTEGER";
+table Customer {
+	id: customer_id @primary_key;
+};
+!!!UPDATE adopt billing module
+import { Invoice, invoice_id, Billing } from "../billing/db.schema";
+table Payment {
+	invoice: invoice_id ~ Invoice(id);
+	@role Billing {
+		select;
+	};
+};
+!!!FILE ../billing/db.schema
+import { Customer, customer_id } from "./customers.schema";
+role Billing "accounting" {
+	default {
+		select;
+	};
+};
+scalar invoice_id = sql"INTEGER" @index;
+table Invoice "bills" {
+	id: invoice_id @primary_key;
+	customer: customer_id ~ Customer(id);
+	total: sql"NUMERIC" @check (_ > 1);
+	note: sql"TEXT";
+	@index(customer);
+};
+table Unrelated {
+	id: invoice_id;
+	other: invoice_id;
+};
+!!!FILE ../billing/customers.schema
+scalar customer_id = sql"INTEGER";
+table Customer {
+	id: customer_id @primary_key;
+};
+!!!UPDATE managed billing module can be changed
+import { Invoice, invoice_id, Billing } from "../billing/db.schema";
+table Payment {
+	invoice: invoice_id ~ Invoice(id);
+	@role Billing {
+		select;
+	};
+};
+!!!FILE ../billing/db.schema
+import { Customer, customer_id } from "./customers.schema";
+role Billing "accounting" {
+	default {
+		select;
+	};
+};
+scalar invoice_id = sql"INTEGER" @index;
+table Invoice "bills" {
+	id: invoice_id @primary_key;
+	customer: customer_id ~ Customer(id);
+	total: sql"NUMERIC" @check (_ > 1);
+	note: sql"TEXT";
+	paid: sql"BOOLEAN";
+	@index(customer);
+};
+table Unrelated {
+	id: invoice_id;
+	other: invoice_id;
+};
+!!!FILE ../billing/customers.schema
+scalar customer_id = sql"INTEGER";
+table Customer {
+	id: customer_id @primary_key;
+};
+!!!UPDATE release billing module
+import @external { Invoice, invoice_id, Billing } from "../billing/db.schema";
+table Payment {
+	invoice: invoice_id ~ Invoice(id);
+	@role Billing {
+		select;
+	};
+};
+!!!FILE ../billing/db.schema
+import { Customer, customer_id } from "./customers.schema";
+role Billing "accounting" {
+	default {
+		select;
+	};
+};
+scalar invoice_id = sql"INTEGER" @index;
+table Invoice "bills" {
+	id: invoice_id @primary_key;
+	customer: customer_id ~ Customer(id);
+	total: sql"NUMERIC" @check (_ > 1);
+	note: sql"TEXT";
+	paid: sql"BOOLEAN";
+	@index(customer);
+};
+table Unrelated {
+	id: invoice_id;
+	other: invoice_id;
+};
+!!!FILE ../billing/customers.schema
+scalar customer_id = sql"INTEGER";
+table Customer {
+	id: customer_id @primary_key;
+};
+!!!RESULT
+-- updated: external stubs are referenced, never created --
+CREATE TABLE payments (
+	invoice invoice_id NOT NULL
+);
+CREATE INDEX payments_invoice_idx ON payments(
+	invoice
+);
+GRANT SELECT ON payments TO billing;
+ALTER TABLE payments ADD CONSTRAINT payments_invoice_fk FOREIGN KEY(invoice) REFERENCES invoices(id);
+-- updated: upstream renames table and role, changes unrelated parts --
+
+-- updated: adopt billing module --
+
+-- updated: managed billing module can be changed --
+ALTER TABLE bills ADD COLUMN paid BOOLEAN NOT NULL;
+-- updated: release billing module --
+
+-- updated: cleanup schema changes --
+DROP TABLE payments;

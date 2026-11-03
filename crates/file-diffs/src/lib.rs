@@ -13,7 +13,7 @@ mod patch_util;
 
 use Error::*;
 
-pub use self::migration::Migration;
+pub use self::migration::{Migration, ROOT_FILE, Snapshot, Sources};
 
 #[derive(Debug)]
 pub struct MigrationId {
@@ -76,6 +76,9 @@ pub fn list_ids(path: &Path) -> Result<Vec<MigrationId>> {
 		}
 		let dirname = ele.file_name();
 		let dirname = dirname.to_str().ok_or_else(|| NonUtf8(dirname.clone()))?;
+		if !dirname.starts_with(|c: char| c.is_ascii_digit()) {
+			continue;
+		}
 
 		let mut split = dirname.splitn(2, '_');
 		let Some(id) = split.next() else {

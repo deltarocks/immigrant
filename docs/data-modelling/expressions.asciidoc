@@ -60,7 +60,7 @@ table Example {
         /// boolean literal
         @check(_ == true)
         /// string literal
-        @check(_ != 'forbidden')
+        @check(_ != "forbidden")
         /// numeric literal
         @check(_ != 42)
         /// function call

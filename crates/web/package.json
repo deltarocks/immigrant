@@ -1,7 +1,7 @@
 {
 	"name": "@deltarocks/immigrant",
 	"license": "MIT",
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"scripts": {
 		"wasmbuild": "deno run -A scripts/build.ts -p immigrant-web --skip-opt",
 		"prepack": "deno task wasmbuild && pnpm-prepare"

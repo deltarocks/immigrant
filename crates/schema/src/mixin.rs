@@ -1,7 +1,7 @@
 use crate::annotation::AnnotationList;
 use crate::column::Column;
 use crate::id_impls;
-use crate::names::{MixinIdent, MixinKind};
+use crate::names::{MemberRename, MixinIdent, MixinKind};
 use crate::table::{ForeignKey, TableAttribute};
 use crate::uid::{OwnUid, next_uid};
 
@@ -15,6 +15,7 @@ pub struct Mixin {
 	pub attributes: Vec<TableAttribute>,
 	pub foreign_keys: Vec<ForeignKey>,
 	pub mixins: Vec<MixinIdent>,
+	pub renames: Vec<MemberRename>,
 }
 id_impls!(Mixin, MixinKind);
 impl Mixin {
@@ -36,6 +37,7 @@ impl Mixin {
 			attributes,
 			foreign_keys,
 			mixins,
+			renames: Vec::new(),
 		}
 	}
 }

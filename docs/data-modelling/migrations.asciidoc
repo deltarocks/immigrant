@@ -1,0 +1,36 @@
+= Migrations
+:order: 9
+
+== Non-destructive migrations
+
+Both `immigrant commit-unchecked` and `immigrant-migrate commit` accept `--non-destructive`, which controls what happens with data, when a table or a column is removed from the schema. Indexes, constraints and other objects which don't hold data are dropped as usual.
+
+[cols="1,2"]
+|===
+| Mode | Behavior
+
+| `fail`
+| Generating the migration fails, if it would drop a table or a column.
+
+| `keep`
+| Dropped tables and columns are renamed to `obsolete_<id>_<name>`, where `<id>` is the id of the new migration.
+
+| any other value
+| Same as `keep`, but the value is used in place of the migration id.
+|===
+
+Kept objects are detached from the rest of the schema, so they don't prevent future migrations:
+
+* foreign keys, constraints, indexes, policies and grants of kept tables are dropped;
+* kept columns lose `NOT NULL` and defaults;
+* columns of enum and struct types are converted to `TEXT`, columns of domain types to the underlying type.
+
+The id used for kept objects is stored in the migration, so `immigrant regenerate-sql` produces the same SQL:
+
+[source,markdown]
+----
+## Non-destructive
+keep 12
+----
+
+Obsolete objects are not tracked by immigrant, drop them manually once the data is no longer needed.

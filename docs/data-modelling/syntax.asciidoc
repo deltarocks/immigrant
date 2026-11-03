@@ -4,7 +4,7 @@
 
 == Quick Start
 
-Immigrant schema describes your database in a single file.
+Immigrant schema describes your database in a single file, which can be split into modules.
 Instead of writing raw DDL, you declare types, tables, and constraints. Immigrant figures out what SQL to generate, and what migrations to run when you change things.
 
 Here is a minimal schema:
@@ -195,9 +195,9 @@ Annotations can be placed before any item (scalar, enum, struct, table) or befor
 
 [source,immigrant]
 ----
-scalar user_id = sql"TEXT" @check(LEFT(_, 1) == 'U' && char_length(_) == 33);
-scalar client_id = sql"TEXT" @check(LEFT(_, 1) == 'C' && char_length(_) == 33);
-scalar scope_id = sql"TEXT" @check(!(_ ~~ '% %'));
+scalar user_id = sql"TEXT" @check(LEFT(_, 1) == "U" && char_length(_) == 33);
+scalar client_id = sql"TEXT" @check(LEFT(_, 1) == "C" && char_length(_) == 33);
+scalar scope_id = sql"TEXT" @check(!(_ ~~ "% %"));
 scalar created_at = sql"TIMESTAMPTZ" @default(NOW());
 scalar updated_at = sql"TIMESTAMPTZ" @default(NOW());
 scalar expires_in = sql"INTEGER" @check(_ > 0);

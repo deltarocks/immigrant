@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, env::current_dir, process};
 
 use clap::Parser;
-use cli::current_schema;
+use cli::{check_unique_code_names, current_schema};
 use file_diffs::find_root;
 use inflector::{
 	cases::{pascalcase::to_pascal_case, snakecase::to_snake_case},
@@ -290,14 +290,15 @@ fn print_schema() -> anyhow::Result<()> {
 	let mut config = root.clone();
 	config.push("immigrant-diesel.jsonnet");
 
-	let (s, schema, mut report, rn) = current_schema(&root)?;
+	let (_, schema, mut report, rn) = current_schema(&root)?;
+	check_unique_code_names(&schema)?;
 	let rn = &rn;
 	let mut tracker = Tracker::new(["rust", "diesel"]);
 	let generated = generate_schema(schema, &mut report, rn, &mut tracker)?;
 	tracker.report_unused(&mut report);
 	if report.is_error() {
 		eprintln!("schema parsing failed:");
-		for s in report.to_hi_doc(&s) {
+		for s in report.to_hi_doc() {
 			eprint!("{}", hi_doc::source_to_ansi(&s));
 		}
 		process::exit(1);

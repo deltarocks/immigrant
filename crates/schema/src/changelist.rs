@@ -4,13 +4,17 @@
 //! If values are not compatible by the decision of `IsCompatible` trait, then they will not be updated, and instead
 //! old version will be dropped, and the new version will be created.
 
-use std::{collections::HashSet, fmt::Debug};
+use std::{
+	collections::{HashMap, HashSet},
+	fmt::Debug,
+};
 
 use itertools::Itertools;
 
 use crate::{
-	Diff,
+	Diff, HasIdent,
 	diagnostics::Report,
+	names::QualifiedName,
 	renamelist::{RenameMoveaway, RenameOp, RenameTempAllocator, reorder_renames},
 	uid::{RenameExt, RenameMap},
 };
@@ -94,7 +98,7 @@ macro_rules! derive_is_isomorph_by_id_name {
 				_report_other: &mut $crate::diagnostics::Report,
 			) -> bool {
 				use $crate::HasIdent;
-				HasIdent::id(self).name() == HasIdent::id(other).name()
+				HasIdent::id(self).qualified_name() == HasIdent::id(other).qualified_name()
 			}
 		}
 	};
@@ -108,10 +112,108 @@ pub fn mk_change_list<T: RenameExt + Clone + Copy + Debug, V: IsCompatible + IsI
 	report_old: &mut Report,
 	report_new: &mut Report,
 ) -> ChangeList<T> {
+	mk_change_list_paired(rn, old, new, mapper, Vec::new(), report_old, report_new)
+}
+
+pub fn mk_change_list_with_hints<
+	T: RenameExt + HasIdent + Clone + Copy + Debug,
+	V: IsCompatible + IsIsomorph,
+>(
+	rn: &RenameMap,
+	old: &[T],
+	new: &[T],
+	mapper: impl Fn(T) -> V,
+	hints: impl Fn(&T) -> Vec<QualifiedName>,
+	report_old: &mut Report,
+	report_new: &mut Report,
+) -> ChangeList<T> {
+	let pairs = rename_hint_pairs(old, new, hints, report_new);
+	mk_change_list_paired(rn, old, new, mapper, pairs, report_old, report_new)
+}
+
+fn rename_hint_pairs<T: HasIdent>(
+	old: &[T],
+	new: &[T],
+	hints: impl Fn(&T) -> Vec<QualifiedName>,
+	report_new: &mut Report,
+) -> Vec<(usize, usize)> {
+	let old_by_name: HashMap<QualifiedName, usize> = old
+		.iter()
+		.enumerate()
+		.map(|(i, o)| (o.id().qualified_name(), i))
+		.collect();
+	let mut candidates = Vec::new();
+	for (nid, n) in new.iter().enumerate() {
+		for previous in hints(n) {
+			if let Some(oid) = old_by_name.get(&previous) {
+				candidates.push((*oid, nid));
+			}
+		}
+	}
+	let mut active = vec![true; candidates.len()];
+	loop {
+		let renamed_away: HashSet<usize> = candidates
+			.iter()
+			.zip(&active)
+			.filter(|(_, a)| **a)
+			.map(|((oid, _), _)| *oid)
+			.collect();
+		let mut changed = false;
+		for ((oid, nid), active) in candidates.iter().zip(active.iter_mut()) {
+			if !*active {
+				continue;
+			}
+			let occupied = old_by_name
+				.get(&new[*nid].id().qualified_name())
+				.is_some_and(|o| o != oid && !renamed_away.contains(o));
+			if occupied {
+				*active = false;
+				changed = true;
+			}
+		}
+		if !changed {
+			break;
+		}
+	}
+	let mut used_old = HashSet::new();
+	let mut used_new = HashSet::new();
+	let mut pairs = Vec::new();
+	for ((oid, nid), active) in candidates.into_iter().zip(active) {
+		if !active {
+			continue;
+		}
+		if !used_old.insert(oid) || !used_new.insert(nid) {
+			report_new
+				.error("conflicting rename hints")
+				.annotate("renamed here", new[nid].id().span());
+			continue;
+		}
+		pairs.push((oid, nid));
+	}
+	pairs
+}
+
+fn mk_change_list_paired<T: RenameExt + Clone + Copy + Debug, V: IsCompatible + IsIsomorph>(
+	rn: &RenameMap,
+	old: &[T],
+	new: &[T],
+	mapper: impl Fn(T) -> V,
+	pairs: Vec<(usize, usize)>,
+	report_old: &mut Report,
+	report_new: &mut Report,
+) -> ChangeList<T> {
 	let mut out = <ChangeList<T>>::new();
 
 	let mut old_listed = HashSet::new();
 	let mut new_listed = HashSet::new();
+	for (oid, nid) in pairs {
+		old_listed.insert(oid);
+		new_listed.insert(nid);
+		out.updated.push(Diff {
+			old: old[oid],
+			new: new[nid],
+		});
+	}
 
 	// Final list of occupied items
 	let occupancy = new.iter().map(|n| n.db(rn)).collect::<HashSet<_>>();

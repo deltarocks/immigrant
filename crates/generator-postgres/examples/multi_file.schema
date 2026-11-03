@@ -1,0 +1,80 @@
+!!!TEST tables split across files
+import { User, user_id } from "./auth.schema";
+table Post {
+	author: user_id ~ User(id);
+};
+!!!FILE auth.schema
+scalar user_id = sql"INTEGER";
+table User {
+	id: user_id @primary_key;
+};
+!!!UPDATE move User into the root file
+import { user_id } from "./auth.schema";
+table User {
+	id: user_id @primary_key;
+};
+table Post {
+	author: user_id ~ User(id);
+};
+!!!FILE auth.schema
+scalar user_id = sql"INTEGER";
+!!!UPDATE move auth.schema to users/auth.schema, import with alias
+import { user_id as uid } from "./users/auth.schema";
+table User {
+	id: uid @primary_key;
+};
+table Post {
+	author: uid ~ User(id);
+};
+!!!FILE users/auth.schema
+scalar user_id = sql"INTEGER";
+!!!UPDATE same-named private tables, unused import still managed
+import { user_id } from "./users/auth.schema";
+import { Log as AuthLog } from "./users/log.schema";
+table User {
+	id: user_id @primary_key;
+};
+table Post {
+	author: user_id ~ User(id);
+};
+table Log "post_logs" {
+	author: user_id ~ User(id);
+};
+!!!FILE users/auth.schema
+scalar user_id = sql"INTEGER";
+!!!FILE users/log.schema
+import { user_id } from "./auth.schema";
+table Log "auth_logs" {
+	user_id;
+};
+!!!RESULT
+-- updated: tables split across files --
+CREATE DOMAIN user_id AS INTEGER;
+CREATE TABLE posts (
+	author user_id NOT NULL
+);
+CREATE TABLE users (
+	id user_id NOT NULL
+,	CONSTRAINT users_id_pkey PRIMARY KEY(id)
+);
+ALTER TABLE posts ADD CONSTRAINT posts_author_fk FOREIGN KEY(author) REFERENCES users(id);
+-- updated: move User into the root file --
+
+-- updated: move auth.schema to users/auth.schema, import with alias --
+
+-- updated: same-named private tables, unused import still managed --
+CREATE TABLE post_logs (
+	author user_id NOT NULL
+);
+CREATE TABLE auth_logs (
+	user_id user_id NOT NULL
+);
+ALTER TABLE post_logs ADD CONSTRAINT post_logs_author_fk FOREIGN KEY(author) REFERENCES users(id);
+-- updated: cleanup schema changes --
+ALTER TABLE posts DROP CONSTRAINT posts_author_fk;
+ALTER TABLE post_logs DROP CONSTRAINT post_logs_author_fk;
+DROP TABLE users;
+DROP TABLE posts;
+DROP TABLE post_logs;
+DROP TABLE auth_logs;
+DROP DOMAIN user_id;

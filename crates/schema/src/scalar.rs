@@ -13,7 +13,8 @@ use crate::{
 	diagnostics::Report,
 	index::{Check, Index, PrimaryKey, UniqueConstraint},
 	names::{
-		DbEnumItem, DbNativeType, EnumItemDefName, EnumItemKind, TypeDefName, TypeIdent, TypeKind,
+		DbEnumItem, DbNativeType, EnumItemDefName, EnumItemKind, MemberRename, TypeDefName,
+		TypeIdent, TypeKind,
 	},
 	root::Schema,
 	uid::{OwnUid, RenameExt, RenameMap, next_uid},
@@ -74,6 +75,7 @@ pub struct Enum {
 	pub docs: Vec<String>,
 	pub annotations: AnnotationList,
 	pub items: Vec<EnumItem>,
+	pub renames: Vec<MemberRename>,
 }
 impl Enum {
 	pub fn new(
@@ -88,6 +90,7 @@ impl Enum {
 			docs,
 			annotations,
 			items,
+			renames: Vec::new(),
 		}
 	}
 	pub fn db_items(&self, rn: &RenameMap) -> Vec<DbEnumItem> {
@@ -161,7 +164,7 @@ pub struct Scalar {
 	name: TypeDefName,
 	pub docs: Vec<String>,
 	pub annotations: AnnotationList,
-	native: InlineSqlType,
+	pub(crate) native: InlineSqlType,
 	pub attributes: Vec<ScalarAttribute>,
 	inlined: bool,
 }

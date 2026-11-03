@@ -2,7 +2,7 @@ use std::env::current_dir;
 use std::process;
 
 use clap::Parser;
-use cli::current_schema;
+use cli::{check_unique_code_names, current_schema};
 use file_diffs::find_root;
 use schema::{HasIdent, SchemaTable, root::Item, table::Cardinality};
 
@@ -24,10 +24,11 @@ fn main() -> anyhow::Result<()> {
 	let _opts = Opts::parse();
 
 	let root = find_root(&current_dir()?)?;
-	let (s, schema, report, rn) = current_schema(&root)?;
+	let (_, schema, report, rn) = current_schema(&root)?;
+	check_unique_code_names(&schema)?;
 	if report.is_error() {
 		eprintln!("schema parsing failed:");
-		for s in report.to_hi_doc(&s) {
+		for s in report.to_hi_doc() {
 			eprint!("{}", hi_doc::source_to_ansi(&s));
 		}
 		process::exit(1);
@@ -104,7 +105,11 @@ fn main() -> anyhow::Result<()> {
 					print!(" {}.(", fk.target_table().id().name());
 					{
 						let mut out = String::new();
-						t.print_column_list(&mut out, fk.target_columns().iter().copied(), &rn);
+						fk.target_table().print_column_list(
+							&mut out,
+							fk.target_columns().iter().copied(),
+							&rn,
+						);
 						print!("{out}");
 					}
 					println!(")");

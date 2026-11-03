@@ -2,6 +2,7 @@
 source: cmds/immigrant-dbt/src/main.rs
 expression: strip_ansi(&err)
 ---
+   ╭──[db.schema]
    ┊
 3  │ };
 4  │
